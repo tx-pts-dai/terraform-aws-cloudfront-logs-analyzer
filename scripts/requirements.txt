@@ -1,0 +1,3 @@
+pandas
+pyarrow
+s3fs  # optional, only if you want pyarrow to write directly to s3
