@@ -1,0 +1,16 @@
+name: Release on tag
+
+# Tag should have the same version as in the `setup.py`
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: tx-pts-dai/github-workflows/.github/workflows/gh-release.yaml@v2.5.1
+    with:
+      tag: ${{ github.ref_name }}
