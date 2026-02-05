@@ -1,6 +1,5 @@
 name: Release on tag
 
-# Tag should have the same version as in the `setup.py`
 on:
   push:
     tags:
