@@ -3,8 +3,33 @@
 This module provides a AWS resources and helper scripts to analyze CloudFront Parquet logs using AWS Glue and Athena.
 
 ## Basic Usage
+Global
 ```
-module "logs_analyzer" {
+module "global_logs_analyzer" {
+  source  = "tx-pts-dai/cloudront/logs-analyzer"
+  version = "2.0.0"
+
+  s3_parquet_bucket = {
+    name = "my-logs-abc"
+    logs_prefix = "AWSLogs/{account_id}/Cloudfront/"
+  }
+
+  s3_results_bucket = {
+    create = true
+  }
+
+  # Do not place both files in the same folder
+  # Athena would mix them up due to common column names
+  s3_supporters_files = {
+    ip_whitelist_fullpath = "s3://arn/full/path/to/folder"
+    ip_whitelist_fullpath = "s3://arn/full/path/to/folder2"
+  }
+}
+```
+
+Per Distribution
+```
+module "per_distrologs_analyzer" {
   source  = "tx-pts-dai/cloudront/logs-analyzer"
   version = "2.0.0"
 
@@ -15,20 +40,12 @@ module "logs_analyzer" {
 
   s3_parquet_bucket = {
     name = "my-logs-abc"
-    # logs_prefix should points to the parent folder of the year in the partitioning
-    logs_prefix = "AWSLogs/a/b/c"
+    logs_prefix = "AWSLogs/{account_id}/Cloudfront/{distro_id}/"
   }
 
   s3_results_bucket = {
     create = true
-    # name = "" (optional)
-    # output_prefix = "" (optional)
-    # lifecycle_rules = "" (optional)
   }
-
-  # glue_database = {
-  #  name = ""
-  # }
 
   # Do not place both files in the same folder
   # Athena would mix them up due to common column names
@@ -156,7 +173,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| cloudfront\_distribution | The ID of the CloudFront distribution | ```object({ id = string name = optional(string) })``` | n/a | yes |
+| cloudfront\_distribution | The ID of the CloudFront distribution | ```object({ id = optional(string, "global") name = optional(string, "global") })``` | n/a | yes |
 | environment | Environment name (e.g., dev, staging, prod) | `string` | `"prod"` | no |
 | glue\_database | Name of the Glue database for CloudFront logs | ```object({ name = optional(string) })``` | n/a | yes |
 | s3\_parquet\_bucket | Configuration for the existing S3 bucket where CloudFront logs in Parquet format are stored | ```object({ name = string logs_prefix = string })``` | n/a | yes |

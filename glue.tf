@@ -11,6 +11,7 @@ locals {
     { name = "x_edge_location", type = "string" },
     { name = "sc_bytes", type = "string" },
     { name = "c_ip", type = "string" },
+    { name = "c_country", type = "string" },
     { name = "cs_method", type = "string" },
     { name = "cs_host", type = "string" },
     { name = "cs_uri_stem", type = "string" },

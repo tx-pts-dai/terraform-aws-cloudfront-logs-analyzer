@@ -14,8 +14,8 @@ variable "tags" {
 variable "cloudfront_distribution" {
   description = "The ID of the CloudFront distribution"
   type = object({
-    id   = string
-    name = optional(string)
+    id   = optional(string, "global")
+    name = optional(string, "global")
   })
 }
 
@@ -49,7 +49,7 @@ variable "glue_database" {
 variable "s3_supporters_files" {
   description = "Configuration for the S3 bucket where supporter data files are stored"
   type = object({
-    ip_whitelist_fullpath   = optional(string, "s3://bucket_name/full/path/to/ip-whitelist-parquet-format/")
-    ip_geolocation_fullpath = optional(string, "s3://bucket_name/full/path/to/ip-geolocation-parquet-format/")
+    ip_whitelist_fullpath   = optional(string, "s3://arn/full/path/to/ip-whitelist-parquet-format/")
+    ip_geolocation_fullpath = optional(string, "s3://arn/full/path/to/ip-geolocation-parquet-format/")
   })
 }

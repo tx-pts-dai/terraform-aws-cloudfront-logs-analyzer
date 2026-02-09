@@ -3,15 +3,16 @@
 -- -- look for IPs exceeding 1000 requests in any rolling 5-min window
 WITH params AS (
   SELECT
-    2026    AS from_year,
-    2026    AS to_year,
-    2       AS from_month,
-    2       AS to_month,
-    1       AS from_day,
-    1       AS to_day,
-    0       AS from_hour,
-    23      AS to_hour,
-    1000    AS threshold_requests
+    2026      AS from_year,
+    2026      AS to_year,
+    2         AS from_month,
+    2         AS to_month,
+    1         AS from_day,
+    1         AS to_day,
+    0         AS from_hour,
+    23        AS to_hour,
+    1000      AS threshold_requests,
+    "CHANGE"  AS distribution_id
 ),
 
 -- 1 Preprocess timestamp and filter out whitelisted IPs
@@ -24,6 +25,7 @@ base AS (
     AND l.month BETWEEN p.from_month AND p.to_month
     AND l.day BETWEEN p.from_day AND p.to_day
     AND l.hour BETWEEN p.from_hour AND p.to_hour
+    AND l.distribution_id = p.distribution_id -- filter for specific distribution if needed
     AND l.timestamp IS NOT NULL       -- needed in case parquet file doesn't have this field populated
     -- filter out IPs in whitelist
     AND NOT EXISTS (
