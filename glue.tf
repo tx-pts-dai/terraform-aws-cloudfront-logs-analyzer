@@ -11,7 +11,6 @@ locals {
     { name = "x_edge_location", type = "string" },
     { name = "sc_bytes", type = "string" },
     { name = "c_ip", type = "string" },
-    { name = "c_country", type = "string" },
     { name = "cs_method", type = "string" },
     { name = "cs_host", type = "string" },
     { name = "cs_uri_stem", type = "string" },
@@ -40,6 +39,7 @@ locals {
     { name = "sc_content_len", type = "string" },
     { name = "sc_range_start", type = "string" },
     { name = "sc_range_end", type = "string" },
+    { name = "c_country", type = "string" },
   ]
   ip_geolocation_schema = [
     { name = "ip", type = "string" },

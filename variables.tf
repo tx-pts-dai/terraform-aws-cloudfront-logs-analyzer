@@ -53,3 +53,27 @@ variable "s3_supporters_files" {
     ip_geolocation_fullpath = optional(string, "s3://arn/full/path/to/ip-geolocation-parquet-format/")
   })
 }
+
+# Grafana
+variable "grafana_access" {
+  description = "Configuration for Grafana integration"
+  type = object({
+    create            = bool
+    name              = optional(string)
+    custom_policy_arn = optional(string)
+  })
+  default = {
+    create = false
+  }
+}
+
+# Athena Custom Named queries
+variable "athena_custom_named_queries" {
+  description = "List of custom Athena named queries to create"
+  type = list(object({
+    name             = string
+    description      = optional(string)
+    path_to_sql_file = string
+  }))
+  default = []
+}

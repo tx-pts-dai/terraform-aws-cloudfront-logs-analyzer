@@ -28,3 +28,15 @@ resource "aws_athena_named_query" "detect_outliers" {
   # load SQL from a file to keep .tf tidy:
   query = file("${path.module}/athena-queries/detect_outliers.sql")
 }
+
+resource "aws_athena_named_query" "custom_named_queries" {
+  for_each = { for q in var.athena_custom_named_queries : q.name => q }
+
+  name        = each.value.name
+  description = each.value.description != null ? each.value.description : each.value.name
+
+  workgroup = aws_athena_workgroup.cloudfront_logs.name
+  database  = aws_glue_catalog_database.cloudfront_logs.name
+
+  query = file(each.value.path_to_sql_file)
+}
