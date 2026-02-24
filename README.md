@@ -24,6 +24,10 @@ module "global_logs_analyzer" {
     ip_whitelist_fullpath = "s3://arn/full/path/to/folder"
     ip_whitelist_fullpath = "s3://arn/full/path/to/folder2"
   }
+ 
+  grafana_access = {
+    create = true
+  }
 }
 ```
 
@@ -52,6 +56,10 @@ module "per_distrologs_analyzer" {
   s3_supporters_files = {
     ip_whitelist_fullpath = "s3://arn/full/path/to/folder"
     ip_whitelist_fullpath = "s3://arn/full/path/to/folder2"
+  }
+
+  grafana_access = {
+    create = true
   }
 }
 ```
