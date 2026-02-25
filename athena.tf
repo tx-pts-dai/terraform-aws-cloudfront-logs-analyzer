@@ -2,7 +2,7 @@ resource "aws_athena_workgroup" "cloudfront_logs" {
   count = var.athena_workgroup.create ? 1 : 0
 
   name        = local.athena_workgroup_name
-  description = "Athena workgroup for analyzing CloudFront logs for distribution ${var.cloudfront_distribution.id}"
+  description = "Athena workgroup for analyzing CloudFront logs for distribution: {${local.distribution_ids_name}"
 
   configuration {
     enforce_workgroup_configuration = true

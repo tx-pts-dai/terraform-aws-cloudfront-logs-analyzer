@@ -1,5 +1,5 @@
 locals {
-  glue_database_name = lower(var.glue_database.name != null ? var.glue_database.name : "cloudfront_${var.cloudfront_distribution.id}_analytics")
+  glue_database_name = lower(var.glue_database.name != null ? var.glue_database.name : "cloudfront_${local.distribution_ids_name}_analytics")
 
   # CloudFront Parquet v2 schema - extracted from sample logs
   # https://docs.aws.amazon.com/athena/latest/ug/create-cloudfront-table-manual-parquet.html
@@ -66,7 +66,7 @@ locals {
 
 resource "aws_glue_catalog_database" "cloudfront_logs" {
   name        = local.glue_database_name
-  description = "Database for CloudFront ${var.cloudfront_distribution.id} logs analysis"
+  description = "Database for CloudFront ${local.distribution_ids_name} logs analysis"
 
   tags = merge(
     var.tags,
@@ -82,26 +82,33 @@ resource "aws_glue_catalog_database" "cloudfront_logs" {
 resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
   name          = "cloudfront_logs_parquet"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
-  description   = "CloudFront logs in Parquet format with partition projection for distribution ${var.cloudfront_distribution.id}"
+  description   = "CloudFront logs in Parquet format with partition projection for distribution ${local.distribution_ids_name}"
 
   table_type = "EXTERNAL_TABLE"
 
   parameters = {
-    "projection.enabled"        = "true"
-    "projection.year.type"      = "integer"
-    "projection.year.range"     = "2020,2046" # covers the next 20 years
-    "projection.month.type"     = "integer"
-    "projection.month.range"    = "1,12"
-    "projection.month.digits"   = "2"
-    "projection.day.type"       = "integer"
-    "projection.day.range"      = "1,31"
-    "projection.day.digits"     = "2"
-    "projection.hour.type"      = "integer"
-    "projection.hour.range"     = "0,23"
-    "projection.hour.digits"    = "2"
-    "storage.location.template" = "s3://${var.s3_parquet_bucket.name}/${var.s3_parquet_bucket.logs_prefix}$${year}/$${month}/$${day}/$${hour}"
-    "EXTERNAL"                  = "TRUE"   # true means table is managed by us not AWS
-    "parquet.compression"       = "SNAPPY" # cannot be changed, enforced by AWS
+    "EXTERNAL"                         = "TRUE"   # true means table is managed by us not AWS
+    "parquet.compression"              = "SNAPPY" # cannot be changed, enforced by AWS
+    "projection.enabled"               = "true"
+    "projection.distributionid.type"   = "enum"
+    "projection.distributionid.values" = local.distrubutions_ids
+    "projection.year.type"             = "integer"
+    "projection.year.range"            = "2020,2046" # covers the next 20 years
+    "projection.month.type"            = "integer"
+    "projection.month.range"           = "1,12"
+    "projection.month.digits"          = "2"
+    "projection.day.type"              = "integer"
+    "projection.day.range"             = "1,31"
+    "projection.day.digits"            = "2"
+    "projection.hour.type"             = "integer"
+    "projection.hour.range"            = "0,23"
+    "projection.hour.digits"           = "2"
+    "storage.location.template"        = "s3://${var.s3_parquet_bucket.name}/${var.s3_parquet_bucket.logs_prefix}$${distributionid}/$${year}/$${month}/$${day}/$${hour}"
+  }
+
+  partition_keys {
+    name = "distributionid"
+    type = "string"
   }
 
   partition_keys {

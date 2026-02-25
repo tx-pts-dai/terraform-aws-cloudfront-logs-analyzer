@@ -12,13 +12,11 @@ variable "tags" {
 
 # CloudFront
 variable "cloudfront_distribution" {
-  description = "The ID of the CloudFront distribution"
+  description = "The IDs of the CloudFront distributions to analyze logs for."
   type = object({
-    id   = optional(string, "global")
     name = optional(string, "global")
+    ids  = list(string)
   })
-  default = {
-  }
 }
 
 # S3 Parquet Logs

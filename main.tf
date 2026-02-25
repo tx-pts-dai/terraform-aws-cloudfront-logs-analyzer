@@ -11,19 +11,21 @@ terraform {
 
 ## Locals
 locals {
-  common_tags = {
-    Environment     = var.environment
-    CF_Distribution = var.cloudfront_distribution.id
-    CF_Name         = var.cloudfront_distribution.name != null ? var.cloudfront_distribution.name : "N/A"
-  }
+  distrubutions_ids     = join(",", var.cloudfront_distribution.ids)
+  distribution_ids_name = length(var.cloudfront_distribution.ids) == 1 ? var.cloudfront_distribution.ids[0] : "multiple-ids"
+  athena_workgroup_name = var.athena_workgroup.create ? (var.athena_workgroup.name != null ? var.athena_workgroup.name : "cloudfront-logs-${local.distribution_ids_name}") : null
 
-  athena_workgroup_name = var.athena_workgroup.create ? (var.athena_workgroup.name != null ? var.athena_workgroup.name : "cloudfront-logs-${var.cloudfront_distribution.id}") : null
-
-  s3_results_bucket_name   = lower(var.s3_results_bucket.name != null ? var.s3_results_bucket.name : "cloudfront-${var.cloudfront_distribution.id}-log-analytic-results")
+  s3_results_bucket_name   = lower(var.s3_results_bucket.name != null ? var.s3_results_bucket.name : "cloudfront-${local.distribution_ids_name}-log-analytic-results")
   s3_results_bucket_prefix = var.s3_results_bucket.output_prefix != null ? var.s3_results_bucket.output_prefix : "athena-results/"
 
   # Remove trailing slash if exists and leading slash if exists to avoid double slashes in S3 paths
   s3_parquet_bucket_sanitized_prefix = replace(var.s3_parquet_bucket.logs_prefix, "^/|/$", "")
+
+  common_tags = {
+    Environment      = var.environment
+    CF_Distributions = local.distrubutions_ids
+    CF_Name          = var.cloudfront_distribution.name != null ? var.cloudfront_distribution.name : "N/A"
+  }
 }
 
 ## S3 Bucket for Analysis Results (optional)
