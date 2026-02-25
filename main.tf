@@ -17,6 +17,8 @@ locals {
     CF_Name         = var.cloudfront_distribution.name != null ? var.cloudfront_distribution.name : "N/A"
   }
 
+  athena_workgroup_name = var.athena_workgroup.create ? (var.athena_workgroup.name != null ? var.athena_workgroup.name : "cloudfront-logs-${var.cloudfront_distribution.id}") : null
+
   s3_results_bucket_name   = lower(var.s3_results_bucket.name != null ? var.s3_results_bucket.name : "cloudfront-${var.cloudfront_distribution.id}-log-analytic-results")
   s3_results_bucket_prefix = var.s3_results_bucket.output_prefix != null ? var.s3_results_bucket.output_prefix : "athena-results/"
 

@@ -3,11 +3,27 @@
 This module provides a AWS resources and helper scripts to analyze CloudFront Parquet logs using AWS Glue and Athena.
 
 ## Basic Usage
-Global
+Minimal
 ```
 module "global_logs_analyzer" {
   source  = "tx-pts-dai/cloudront/logs-analyzer"
   version = "2.0.0"
+
+  s3_parquet_bucket = {
+    name = "my-logs-abc"
+    logs_prefix = "AWSLogs/{account_id}/Cloudfront/"
+  }
+  s3_results_bucket = {
+    create = true
+  }
+}
+```
+
+Global
+```
+module "global_logs_analyzer" {
+  source  = "tx-pts-dai/cloudront/logs-analyzer"
+  version = "x.x.x"
 
   s3_parquet_bucket = {
     name = "my-logs-abc"
@@ -35,7 +51,7 @@ Per Distribution
 ```
 module "per_distrologs_analyzer" {
   source  = "tx-pts-dai/cloudront/logs-analyzer"
-  version = "2.0.0"
+  version = "x.x.x"
 
   cloudfront_distribution = {
     id   = "{distribution-id-to-analyze}"
@@ -185,13 +201,14 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | athena\_custom\_named\_queries | List of custom Athena named queries to create | ```list(object({ name = string description = optional(string) path_to_sql_file = string }))``` | `[]` | no |
-| cloudfront\_distribution | The ID of the CloudFront distribution | ```object({ id = optional(string, "global") name = optional(string, "global") })``` | n/a | yes |
+| athena\_workgroup | Configuration for the Athena workgroup | ```object({ create = bool name = optional(string) })``` | ```{ "create": false, "name": "primary" }``` | no |
+| cloudfront\_distribution | The ID of the CloudFront distribution | ```object({ id = optional(string, "global") name = optional(string, "global") })``` | `{}` | no |
 | environment | Environment name (e.g., dev, staging, prod) | `string` | `"prod"` | no |
-| glue\_database | Name of the Glue database for CloudFront logs | ```object({ name = optional(string) })``` | n/a | yes |
+| glue\_database | Name of the Glue database for CloudFront logs | ```object({ name = optional(string) })``` | `{}` | no |
 | grafana\_access | Configuration for Grafana integration | ```object({ create = bool name = optional(string) custom_policy_arn = optional(string) })``` | ```{ "create": false }``` | no |
 | s3\_parquet\_bucket | Configuration for the existing S3 bucket where CloudFront logs in Parquet format are stored | ```object({ name = string logs_prefix = string })``` | n/a | yes |
 | s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
-| s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string, "s3://arn/full/path/to/ip-whitelist-parquet-format/") ip_geolocation_fullpath = optional(string, "s3://arn/full/path/to/ip-geolocation-parquet-format/") })``` | n/a | yes |
+| s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string, "s3://arn/full/path/to/ip-whitelist-parquet-format/") ip_geolocation_fullpath = optional(string, "s3://arn/full/path/to/ip-geolocation-parquet-format/") })``` | `{}` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 
 ### Outputs

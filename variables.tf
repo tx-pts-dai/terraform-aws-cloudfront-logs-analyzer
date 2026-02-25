@@ -17,6 +17,8 @@ variable "cloudfront_distribution" {
     id   = optional(string, "global")
     name = optional(string, "global")
   })
+  default = {
+  }
 }
 
 # S3 Parquet Logs
@@ -38,20 +40,25 @@ variable "s3_results_bucket" {
   })
 }
 
+# Glue Database
 variable "glue_database" {
   description = "Name of the Glue database for CloudFront logs"
   type = object({
     name = optional(string)
   })
+  default = {
+  }
 }
 
 # S3 Bucket for Supporters
 variable "s3_supporters_files" {
   description = "Configuration for the S3 bucket where supporter data files are stored"
   type = object({
-    ip_whitelist_fullpath   = optional(string, "s3://arn/full/path/to/ip-whitelist-parquet-format/")
-    ip_geolocation_fullpath = optional(string, "s3://arn/full/path/to/ip-geolocation-parquet-format/")
+    ip_whitelist_fullpath   = optional(string)
+    ip_geolocation_fullpath = optional(string)
   })
+  default = {
+  }
 }
 
 # Grafana
@@ -67,7 +74,21 @@ variable "grafana_access" {
   }
 }
 
-# Athena Custom Named queries
+# Athena 
+## Workgroup
+variable "athena_workgroup" {
+  description = "Configuration for the Athena workgroup"
+  type = object({
+    create = bool
+    name   = optional(string)
+  })
+  default = {
+    create = false
+    name   = "primary"
+  }
+}
+
+## Custom Named queries
 variable "athena_custom_named_queries" {
   description = "List of custom Athena named queries to create"
   type = list(object({

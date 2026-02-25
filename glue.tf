@@ -158,6 +158,8 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
 # Whitelist/Allowed IPs Table
 # Used to filter out known good IPs (e.g., search engine bots, monitoring services)
 resource "aws_glue_catalog_table" "ip_whitelist" {
+  count = try(length(var.s3_supporters_files.ip_whitelist_fullpath) > 0, false) ? 1 : 0
+
   name          = "ip_whitelist"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
   description   = "Whitelist of allowed IPs with request rate limits"
@@ -200,6 +202,8 @@ resource "aws_glue_catalog_table" "ip_whitelist" {
 # IP Geolocation Cache Table
 # Used to cache geolocation lookups from ipinfo API to avoid repeated API calls
 resource "aws_glue_catalog_table" "ip_geolocation" {
+  count = try(length(var.s3_supporters_files.ip_geolocation_fullpath) > 0, false) ? 1 : 0
+
   name          = "ip_geolocation"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
   description   = "Cache of IP geolocation data from ipinfo API"

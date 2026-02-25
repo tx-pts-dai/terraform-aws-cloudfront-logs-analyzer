@@ -1,5 +1,7 @@
 resource "aws_athena_workgroup" "cloudfront_logs" {
-  name        = "cloudfront-logs-${var.cloudfront_distribution.id}"
+  count = var.athena_workgroup.create ? 1 : 0
+
+  name        = local.athena_workgroup_name
   description = "Athena workgroup for analyzing CloudFront logs for distribution ${var.cloudfront_distribution.id}"
 
   configuration {
@@ -22,7 +24,7 @@ resource "aws_athena_workgroup" "cloudfront_logs" {
 resource "aws_athena_named_query" "detect_outliers" {
   name        = "detect_outliers"
   description = "Find IPs exceeding request threshold in rolling 5-min windows"
-  workgroup   = aws_athena_workgroup.cloudfront_logs.name
+  workgroup   = local.athena_workgroup_name
   database    = aws_glue_catalog_database.cloudfront_logs.name
 
   # load SQL from a file to keep .tf tidy:
@@ -35,7 +37,7 @@ resource "aws_athena_named_query" "custom_named_queries" {
   name        = each.value.name
   description = each.value.description != null ? each.value.description : each.value.name
 
-  workgroup = aws_athena_workgroup.cloudfront_logs.name
+  workgroup = local.athena_workgroup_name
   database  = aws_glue_catalog_database.cloudfront_logs.name
 
   query = file(each.value.path_to_sql_file)
