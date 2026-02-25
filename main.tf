@@ -34,7 +34,7 @@ module "s3_bucket_results" {
   bucket = local.s3_results_bucket_name
 
   versioning = {
-    enabled = true
+    enabled = false
   }
 
   lifecycle_rule = var.s3_results_bucket.lifecycle_rules
