@@ -3,14 +3,10 @@
 -- -- look for IPs exceeding 1000 requests in any rolling 5-min window
 WITH params AS (
   SELECT
-    2026      AS from_year,
-    2026      AS to_year,
-    2         AS from_month,
-    2         AS to_month,
-    1         AS from_day,
-    1         AS to_day,
-    0         AS from_hour,
-    23        AS to_hour,
+    '2026/02/01' AS from_dt,
+    '2026/02/01' AS to_dt,
+    0            AS from_hour,
+    23           AS to_hour,
     1000      AS threshold_requests,
     "CHANGE"  AS distribution_id
 ),
@@ -21,9 +17,7 @@ base AS (
     from_unixtime(CAST(l.timestamp AS BIGINT)) AS ts  -- use timestamp_ms for millisecond precision
   FROM cloudfront_logs_parquet l
   CROSS JOIN params p
-  WHERE l.year BETWEEN p.from_year AND p.to_year
-    AND l.month BETWEEN p.from_month AND p.to_month
-    AND l.day BETWEEN p.from_day AND p.to_day
+  WHERE l.dt BETWEEN p.from_dt AND p.to_dt
     AND l.hour BETWEEN p.from_hour AND p.to_hour
     AND l.distribution_id = p.distribution_id -- filter for specific distribution if needed
     AND l.timestamp IS NOT NULL       -- needed in case parquet file doesn't have this field populated

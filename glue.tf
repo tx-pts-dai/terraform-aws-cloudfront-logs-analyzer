@@ -78,7 +78,8 @@ resource "aws_glue_catalog_database" "cloudfront_logs" {
 }
 
 # Glue Table with Partition Projection for CloudFront v2 Format
-# This handles the 2026/01/26/08/ folder structure
+# This handles the {distributionid}/{yyyy/MM/dd}/{hour}/ folder structure
+# dt partition uses a date projection (yyyy/MM/dd) mapping directly to S3 path segments
 resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
   name          = "cloudfront_logs_parquet"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
@@ -92,18 +93,15 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
     "projection.enabled"               = "true"
     "projection.distributionid.type"   = "enum"
     "projection.distributionid.values" = local.distrubutions_ids
-    "projection.year.type"             = "integer"
-    "projection.year.range"            = "2020,2046" # covers the next 20 years
-    "projection.month.type"            = "integer"
-    "projection.month.range"           = "1,12"
-    "projection.month.digits"          = "2"
-    "projection.day.type"              = "integer"
-    "projection.day.range"             = "1,31"
-    "projection.day.digits"            = "2"
+    "projection.dt.type"               = "date"
+    "projection.dt.range"              = "2020/01/01,NOW"
+    "projection.dt.format"             = "yyyy/MM/dd"
+    "projection.dt.interval"           = "1"
+    "projection.dt.interval.unit"      = "DAYS"
     "projection.hour.type"             = "integer"
     "projection.hour.range"            = "0,23"
     "projection.hour.digits"           = "2"
-    "storage.location.template"        = "s3://${var.s3_parquet_bucket.name}/${var.s3_parquet_bucket.logs_prefix}$${distributionid}/$${year}/$${month}/$${day}/$${hour}"
+    "storage.location.template"        = "s3://${var.s3_parquet_bucket.name}/${var.s3_parquet_bucket.logs_prefix}$${distributionid}/$${dt}/$${hour}"
   }
 
   partition_keys {
@@ -112,18 +110,8 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
   }
 
   partition_keys {
-    name = "year"
-    type = "int"
-  }
-
-  partition_keys {
-    name = "month"
-    type = "int"
-  }
-
-  partition_keys {
-    name = "day"
-    type = "int"
+    name = "dt"
+    type = "string"
   }
 
   partition_keys {
