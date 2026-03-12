@@ -62,6 +62,26 @@ locals {
     { name = "added_by", type = "string" },
     { name = "request_limit", type = "int" }, # Optional per-network request limit (requests per 5-min window)
   ]
+
+  user_agents_schema = [
+    { name = "timestamp", type = "string" },
+    { name = "timestamp_ms", type = "string" },
+    { name = "sc_status", type = "string" },
+    { name = "user_agent_md5", type = "string" }, # MD5 hash efficient grouping and filtering
+    { name = "ua_family", type = "string" },
+    { name = "ua_major", type = "string" },
+    { name = "ua_minor", type = "string" },
+    { name = "ua_patch", type = "string" },
+    { name = "ua_patch_minor", type = "string" },
+    { name = "os_family", type = "string" },
+    { name = "os_major", type = "string" },
+    { name = "os_minor", type = "string" },
+    { name = "os_patch", type = "string" },
+    { name = "os_patch_minor", type = "string" },
+    { name = "device_family", type = "string" },
+    { name = "device_brand", type = "string" },
+    { name = "device_model", type = "string" },
+  ]
 }
 
 resource "aws_glue_catalog_database" "cloudfront_logs" {
@@ -135,6 +155,75 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
     # Dynamic columns from local schema definition
     dynamic "columns" {
       for_each = local.cloudfront_parquet_schema
+      content {
+        name = columns.value.name
+        type = columns.value.type
+      }
+    }
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.cloudfront_logs
+  ]
+}
+
+resource "aws_glue_catalog_table" "preprocessed_user_agents" {
+  count = var.user_agents_preprocessing.enable ? 1 : 0
+
+  name          = "preprocessed_user_agents"
+  database_name = aws_glue_catalog_database.cloudfront_logs.name
+  description   = "Preprocessed user agents in Parquet format with partition projection for distribution ${local.distribution_ids_name}"
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = {
+    "EXTERNAL"                         = "TRUE"   # true means table is managed by us not AWS
+    "parquet.compression"              = "SNAPPY" # cannot be changed, enforced by AWS
+    "projection.enabled"               = "true"
+    "projection.distributionid.type"   = "enum"
+    "projection.distributionid.values" = local.distrubutions_ids
+    "projection.dt.type"               = "date"
+    "projection.dt.range"              = "2020/01/01,NOW"
+    "projection.dt.format"             = "yyyy/MM/dd"
+    "projection.dt.interval"           = "1"
+    "projection.dt.interval.unit"      = "DAYS"
+    "projection.hour.type"             = "integer"
+    "projection.hour.range"            = "0,23"
+    "projection.hour.digits"           = "2"
+    "storage.location.template"        = "s3://${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}$${distributionid}/$${dt}/$${hour}"
+  }
+
+  partition_keys {
+    name = "distributionid"
+    type = "string"
+  }
+
+  partition_keys {
+    name = "dt"
+    type = "string"
+  }
+
+  partition_keys {
+    name = "hour"
+    type = "int"
+  }
+
+  storage_descriptor {
+    location      = "s3://${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      name                  = "ParquetHiveSerDe"
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+      parameters = {
+        "serialization.format" = "1"
+      }
+    }
+
+    # Dynamic columns from local schema definition
+    dynamic "columns" {
+      for_each = local.user_agents_schema
       content {
         name = columns.value.name
         type = columns.value.type

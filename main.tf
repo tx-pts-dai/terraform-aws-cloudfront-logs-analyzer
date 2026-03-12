@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = ">= 2.0"
+    }
   }
 }
 
@@ -18,8 +22,12 @@ locals {
   s3_results_bucket_name   = lower(var.s3_results_bucket.name != null ? var.s3_results_bucket.name : "cloudfront-${local.distribution_ids_name}-log-analytic-results")
   s3_results_bucket_prefix = var.s3_results_bucket.output_prefix != null ? var.s3_results_bucket.output_prefix : "athena-results/"
 
+  s3_preprocessing_bucket_name   = lower(var.user_agents_preprocessing.bucket.name != null ? var.user_agents_preprocessing.bucket.name : "cloudfront-${local.distribution_ids_name}-log-analytic-preprocessing")
+  s3_preprocessing_bucket_prefix = var.user_agents_preprocessing.bucket.output_prefix != null ? var.user_agents_preprocessing.bucket.output_prefix : "preprocessed-data/"
+
   # Remove trailing slash if exists and leading slash if exists to avoid double slashes in S3 paths
-  s3_parquet_bucket_sanitized_prefix = replace(var.s3_parquet_bucket.logs_prefix, "^/|/$", "")
+  s3_parquet_bucket_sanitized_prefix      = replace(var.s3_parquet_bucket.logs_prefix, "^/|/$", "")
+  s3_preprocessed_bucket_sanitized_prefix = replace(local.s3_preprocessing_bucket_prefix, "^/|/$", "")
 
   common_tags = {
     Environment      = var.environment
@@ -42,6 +50,42 @@ module "s3_bucket_results" {
   }
 
   lifecycle_rule = var.s3_results_bucket.lifecycle_rules
+
+  server_side_encryption_configuration = {
+    rule = {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+
+  tags = merge(
+    var.tags,
+    local.common_tags,
+    {
+      Name = local.s3_results_bucket_name
+    }
+  )
+}
+
+module "s3_bucket_preprocessing" {
+  source  = "terraform-aws-modules/s3-bucket/aws"
+  version = "5.10.0"
+
+  create_bucket = var.user_agents_preprocessing.bucket.create
+
+  bucket = local.s3_preprocessing_bucket_name
+
+  versioning = {
+    enabled = false
+  }
+
+  lifecycle_rule = var.user_agents_preprocessing.bucket.lifecycle_rules
 
   server_side_encryption_configuration = {
     rule = {
@@ -111,18 +155,22 @@ resource "aws_iam_policy" "grafana_access" {
         ],
         "Resource" : [
           "arn:aws:s3:::${local.s3_results_bucket_name}/",
-          "arn:aws:s3:::${local.s3_results_bucket_name}/*"
+          "arn:aws:s3:::${local.s3_results_bucket_name}/*",
+          "arn:aws:s3:::${local.s3_preprocessing_bucket_name}/",
+          "arn:aws:s3:::${local.s3_preprocessing_bucket_name}/*"
         ]
       },
       {
-        "Sid" : "ReadOnlyLogsBucket",
+        "Sid" : "ReadOnlyLogsAndPreprocessingBucket",
         "Effect" : "Allow",
         "Action" : [
           "s3:Get*"
         ],
         "Resource" : [
           "arn:aws:s3:::${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}/",
-          "arn:aws:s3:::${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}/*"
+          "arn:aws:s3:::${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}/*",
+          "arn:aws:s3:::${local.s3_preprocessing_bucket_name}/${local.s3_preprocessed_bucket_sanitized_prefix}/",
+          "arn:aws:s3:::${local.s3_preprocessing_bucket_name}/${local.s3_preprocessed_bucket_sanitized_prefix}/*"
         ]
       }
     ]

@@ -168,18 +168,22 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | Name | Version |
 |------|---------|
 | terraform | >= 1.10 |
+| archive | >= 2.0 |
 | aws | >= 6.0 |
 
 ### Providers
 
 | Name | Version |
 |------|---------|
-| aws | 6.33.0 |
+| archive | 2.7.1 |
+| aws | 6.36.0 |
+| terraform | n/a |
 
 ### Modules
 
 | Name | Source | Version |
 |------|--------|---------|
+| s3\_bucket\_preprocessing | terraform-aws-modules/s3-bucket/aws | 5.10.0 |
 | s3\_bucket\_results | terraform-aws-modules/s3-bucket/aws | 5.10.0 |
 
 ### Resources
@@ -189,12 +193,26 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_athena_named_query.custom_named_queries](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_named_query.detect_outliers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_workgroup.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_workgroup) | resource |
+| [aws_cloudwatch_log_group.ua_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_glue_catalog_database.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_database) | resource |
 | [aws_glue_catalog_table.cloudfront_logs_parquet](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_geolocation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_whitelist](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
+| [aws_glue_catalog_table.preprocessed_user_agents](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_iam_policy.grafana_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.grafana](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.ua_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy.ua_lambda](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_lambda_event_source_mapping.ua_preprocessing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_event_source_mapping) | resource |
+| [aws_lambda_function.ua_preprocessing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_layer_version.ua_deps](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_layer_version) | resource |
+| [aws_s3_bucket_notification.ua_preprocessing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_notification) | resource |
+| [aws_sqs_queue.ua_preprocessing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue) | resource |
+| [aws_sqs_queue.ua_preprocessing_dlq](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue) | resource |
+| [aws_sqs_queue_policy.ua_preprocessing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue_policy) | resource |
+| [terraform_data.ua_pip_install](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
+| [archive_file.ua_lambda](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
+| [archive_file.ua_layer](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 
 ### Inputs
 
@@ -210,6 +228,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
 | s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
+| user\_agents\_preprocessing | Configuration for user agent preprocessing | ```object({ enable = bool bucket = optional(object({ create = bool name = optional(string) output_prefix = optional(string) lifecycle_rules = optional(list(any), []) }), { create = false }) })``` | ```{ "enable": false }``` | no |
 
 ### Outputs
 
