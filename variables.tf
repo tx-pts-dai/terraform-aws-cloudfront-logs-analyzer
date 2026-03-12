@@ -38,6 +38,25 @@ variable "s3_results_bucket" {
   })
 }
 
+# Preprocessing Functions
+variable "user_agents_preprocessing" {
+  description = "Configuration for user agent preprocessing"
+  type = object({
+    enable = bool
+    bucket = optional(object({
+      create          = bool
+      name            = optional(string)
+      output_prefix   = optional(string)
+      lifecycle_rules = optional(list(any), [])
+      }), {
+      create = false
+    })
+  })
+  default = {
+    enable = false
+  }
+}
+
 # Glue Database
 variable "glue_database" {
   description = "Name of the Glue database for CloudFront logs"
