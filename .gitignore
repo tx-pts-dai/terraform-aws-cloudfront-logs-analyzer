@@ -2,6 +2,10 @@ _provider.tf
 
 environments/
 scripts/.venv
+.venv
+__pycache__/
+*.parquet
+preprocessing/*/output/
 
 # Local .terraform directories
 **/.terraform/*

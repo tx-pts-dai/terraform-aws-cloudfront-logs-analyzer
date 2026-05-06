@@ -1,67 +1,31 @@
 locals {
   glue_database_name = lower(var.glue_database.name != null ? var.glue_database.name : "cloudfront_${local.distribution_ids_name}_analytics")
 
-  # CloudFront Parquet v2 schema - extracted from sample logs
-  # https://docs.aws.amazon.com/athena/latest/ug/create-cloudfront-table-manual-parquet.html
-  cloudfront_parquet_schema = [
-    { name = "date", type = "string" },
-    { name = "time", type = "string" },
-    { name = "timestamp", type = "string" },    # found by analysing the sample logs
-    { name = "timestamp_ms", type = "string" }, # found by analysing the sample logs
-    { name = "x_edge_location", type = "string" },
-    { name = "sc_bytes", type = "string" },
-    { name = "c_ip", type = "string" },
-    { name = "cs_method", type = "string" },
-    { name = "cs_host", type = "string" },
-    { name = "cs_uri_stem", type = "string" },
-    { name = "sc_status", type = "string" },
-    { name = "cs_referer", type = "string" },
-    { name = "cs_user_agent", type = "string" },
-    { name = "cs_uri_query", type = "string" },
-    { name = "cs_cookie", type = "string" },
-    { name = "x_edge_result_type", type = "string" },
-    { name = "x_edge_request_id", type = "string" },
-    { name = "x_host_header", type = "string" },
-    { name = "cs_protocol", type = "string" },
-    { name = "cs_bytes", type = "string" },
-    { name = "time_taken", type = "string" },
-    { name = "x_forwarded_for", type = "string" },
-    { name = "ssl_protocol", type = "string" },
-    { name = "ssl_cipher", type = "string" },
-    { name = "x_edge_response_result_type", type = "string" },
-    { name = "cs_protocol_version", type = "string" },
-    { name = "fle_status", type = "string" },
-    { name = "fle_encrypted_fields", type = "string" },
-    { name = "c_port", type = "string" },
-    { name = "time_to_first_byte", type = "string" },
-    { name = "x_edge_detailed_result_type", type = "string" },
-    { name = "sc_content_type", type = "string" },
-    { name = "sc_content_len", type = "string" },
-    { name = "sc_range_start", type = "string" },
-    { name = "sc_range_end", type = "string" },
-    { name = "c_country", type = "string" },
-  ]
-  ip_geolocation_schema = [
-    { name = "ip", type = "string" },
-    { name = "ip_version", type = "int" },
-    { name = "city", type = "string" },
-    { name = "region", type = "string" },
-    { name = "country", type = "string" },
-    { name = "hostname", type = "string" },
-    { name = "org", type = "string" },
-    { name = "loc", type = "string" },         # Latitude,Longitude string ("lat,lon") for simple mapping
-    { name = "cached_date", type = "string" }, # Timestamp when this entry was cached/created
-    { name = "source", type = "string" },      # Source of the lookup (e.g., ipinfo, maxmind) for provenance
-  ]
-  ip_whitelist_schema = [
-    { name = "ip", type = "string" },
-    { name = "ip_version", type = "int" },
-    { name = "cidr_size", type = "int" }, # CIDR prefix length (e.g., 27, 32, 64)
-    { name = "reason", type = "string" },
-    { name = "added_date", type = "string" },
-    { name = "added_by", type = "string" },
-    { name = "request_limit", type = "int" }, # Optional per-network request limit (requests per 5-min window)
-  ]
+  glue_format_configs = {
+    parquet = {
+      input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+      output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+      serde_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+      serde_params  = { "serialization.format" = "1" }
+      table_params  = { "parquet.compression" = "SNAPPY" }
+    }
+    json = {
+      input_format  = "org.apache.hadoop.mapred.TextInputFormat"
+      output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+      serde_library = "org.openx.data.jsonserde.JsonSerDe"
+      serde_params  = { "serialization.format" = "1" }
+      table_params  = {}
+    }
+    csv = {
+      input_format  = "org.apache.hadoop.mapred.TextInputFormat"
+      output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+      serde_library = "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
+      serde_params  = { "field.delim" = ",", "serialization.format" = "," }
+      table_params  = { "skip.header.line.count" = "1" }
+    }
+  }
+
+  ip_whitelist_fmt = local.glue_format_configs[var.s3_supporters_files.ip_whitelist_format]
 }
 
 resource "aws_glue_catalog_database" "cloudfront_logs" {
@@ -134,7 +98,46 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
 
     # Dynamic columns from local schema definition
     dynamic "columns" {
-      for_each = local.cloudfront_parquet_schema
+      # CloudFront Parquet v2 schema - extracted from sample logs
+      # https://docs.aws.amazon.com/athena/latest/ug/create-cloudfront-table-manual-parquet.html
+      for_each = [
+        { name = "date", type = "string" },
+        { name = "time", type = "string" },
+        { name = "timestamp", type = "string" },    # found by analysing the sample logs
+        { name = "timestamp_ms", type = "string" }, # found by analysing the sample logs
+        { name = "x_edge_location", type = "string" },
+        { name = "sc_bytes", type = "string" },
+        { name = "c_ip", type = "string" },
+        { name = "cs_method", type = "string" },
+        { name = "cs_host", type = "string" },
+        { name = "cs_uri_stem", type = "string" },
+        { name = "sc_status", type = "string" },
+        { name = "cs_referer", type = "string" },
+        { name = "cs_user_agent", type = "string" },
+        { name = "cs_uri_query", type = "string" },
+        { name = "cs_cookie", type = "string" },
+        { name = "x_edge_result_type", type = "string" },
+        { name = "x_edge_request_id", type = "string" },
+        { name = "x_host_header", type = "string" },
+        { name = "cs_protocol", type = "string" },
+        { name = "cs_bytes", type = "string" },
+        { name = "time_taken", type = "string" },
+        { name = "x_forwarded_for", type = "string" },
+        { name = "ssl_protocol", type = "string" },
+        { name = "ssl_cipher", type = "string" },
+        { name = "x_edge_response_result_type", type = "string" },
+        { name = "cs_protocol_version", type = "string" },
+        { name = "fle_status", type = "string" },
+        { name = "fle_encrypted_fields", type = "string" },
+        { name = "c_port", type = "string" },
+        { name = "time_to_first_byte", type = "string" },
+        { name = "x_edge_detailed_result_type", type = "string" },
+        { name = "sc_content_type", type = "string" },
+        { name = "sc_content_len", type = "string" },
+        { name = "sc_range_start", type = "string" },
+        { name = "sc_range_end", type = "string" },
+        { name = "c_country", type = "string" },
+      ]
       content {
         name = columns.value.name
         type = columns.value.type
@@ -161,27 +164,35 @@ resource "aws_glue_catalog_table" "ip_whitelist" {
 
   table_type = "EXTERNAL_TABLE"
 
-  parameters = {
-    "EXTERNAL"            = "TRUE"
-    "has_encrypted_data"  = "false"
-    "parquet.compression" = "SNAPPY"
-  }
+  parameters = merge(
+    {
+      "EXTERNAL"           = "TRUE"
+      "has_encrypted_data" = "false"
+    },
+    local.ip_whitelist_fmt.table_params
+  )
 
   storage_descriptor {
     location      = var.s3_supporters_files.ip_whitelist_fullpath
-    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
-    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+    input_format  = local.ip_whitelist_fmt.input_format
+    output_format = local.ip_whitelist_fmt.output_format
 
     ser_de_info {
-      name                  = "ParquetHiveSerDe"
-      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
-      parameters = {
-        "serialization.format" = "1"
-      }
+      name                  = var.s3_supporters_files.ip_whitelist_format
+      serialization_library = local.ip_whitelist_fmt.serde_library
+      parameters            = local.ip_whitelist_fmt.serde_params
     }
 
     dynamic "columns" {
-      for_each = local.ip_whitelist_schema
+      for_each = [
+        { name = "ip", type = "string" },
+        { name = "ip_version", type = "int" },
+        { name = "cidr_size", type = "int" }, # CIDR prefix length (e.g., 27, 32, 64)
+        { name = "reason", type = "string" },
+        { name = "added_date", type = "string" },
+        { name = "added_by", type = "string" },
+        { name = "request_limit", type = "int" }, # Optional per-network request limit (requests per 5-min window)
+      ]
       content {
         name = columns.value.name
         type = columns.value.type
@@ -225,7 +236,18 @@ resource "aws_glue_catalog_table" "ip_geolocation" {
     }
 
     dynamic "columns" {
-      for_each = local.ip_geolocation_schema
+      for_each = [
+        { name = "ip", type = "string" },
+        { name = "ip_version", type = "int" },
+        { name = "city", type = "string" },
+        { name = "region", type = "string" },
+        { name = "country", type = "string" },
+        { name = "hostname", type = "string" },
+        { name = "org", type = "string" },
+        { name = "loc", type = "string" },         # Latitude,Longitude string ("lat,lon") for simple mapping
+        { name = "cached_date", type = "string" }, # Timestamp when this entry was cached/created
+        { name = "source", type = "string" },      # Source of the lookup (e.g., ipinfo, maxmind) for provenance
+      ]
       content {
         name = columns.value.name
         type = columns.value.type

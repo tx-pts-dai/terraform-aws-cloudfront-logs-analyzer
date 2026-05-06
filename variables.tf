@@ -53,9 +53,14 @@ variable "s3_supporters_files" {
   description = "Configuration for the S3 bucket where supporter data files are stored"
   type = object({
     ip_whitelist_fullpath   = optional(string)
+    ip_whitelist_format     = optional(string, "parquet")
     ip_geolocation_fullpath = optional(string)
   })
   default = {
+  }
+  validation {
+    condition     = contains(["parquet", "json", "csv"], var.s3_supporters_files.ip_whitelist_format)
+    error_message = "Must be one of: parquet, json, csv"
   }
 }
 
