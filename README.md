@@ -87,55 +87,50 @@ module "per_distrologs_analyzer" {
 
 ### Quick architecture
 
-CloudFront (Parquet logs in S3) -> Glue Data Catalog (tables) -> Athena queries (workgroup per env) -> Results in S3
-
-Mermaid architecture diagram
+CloudFront delivers partitioned Parquet logs to S3. A Glue Data Catalog exposes them — together with IP geolocation and IP whitelist support files — as Athena projection tables. Athena queries join the logs against the support tables and write results to a cached S3 bucket, which downstream tools (e.g. Grafana) read to render dashboards.
 
 ```mermaid
-flowchart LR
+flowchart TB
+
   subgraph Source
     CF[CloudFront]
+    S3_Parquet[S3 <br> Partioned Parquet Logs]
+
+    CF -->|Parquet logs| S3_Parquet
   end
 
-  CF -->|W3C logs| S3w[S3 - W3C Logs]
-  CF -->|Parquet conversion| S3p[S3 - Parquet Logs]
 
-  subgraph Optional
-    GoAccess[GoAccess]
-  end
-  S3w --> GoAccess
-  GoAccess --> S3a[S3 - Analyse Results]
+  subgraph Processing
+    AthenaProj[Athena Projection Tables]
+    T_ParquetLogs[Parquet Logs]
+    T_IPGeo[IP Geolocation]
+    T_IPWL[IP Whitelist]
 
-  S3p --> AthenaProj[Athena Projection Table]
-  AthenaProj --> AthenaQueries[Athena Queries]
-  AthenaQueries --> S3a
-  S3a --> UI[UI QuickSight / Grafana]
-
-  subgraph SupportTables[Support tables]
-    ParquetLogs[Parquet Logs]
-    IPGeo[IP Geolocation]
-    IPWL[IP Whitelist]
+    AthenaProj -.- T_ParquetLogs
+    AthenaProj -.- T_IPGeo
+    AthenaProj -.- T_IPWL
   end
 
-  AthenaQueries --> ParquetLogs
-  AthenaQueries --> IPGeo
-  AthenaQueries --> IPWL
+  subgraph Reading
+    S3_Cache[S3 <br> Cached Results]
+    S3_support[S3 <br> Support Files]
+    AthenaQueries[Athena Queries]
 
-  ParquetLogs --> S3p
-  IPGeo --> S3support[S3 - Support Files]
-  IPWL --> S3support
+    UI[e.g. Grafana] -->|query| AthenaQueries
+    AthenaQueries --> S3_Cache
+    AthenaQueries --> AthenaProj
+    S3_Cache --> UI
+  end
+
+  T_ParquetLogs -.-> S3_Parquet
+  T_IPGeo -.-> S3_support
+  T_IPWL -.-> S3_support
 
   style CF stroke:#888,stroke-width:1px
-  style S3p stroke:#888
-  style S3w stroke:#888
+  style S3_Parquet stroke:#888
   style AthenaQueries stroke:#888
   style UI stroke:#888
 ```
-
-## Improvements
-
-- [ ] Provide a script to backfill logs from W3C to Parquet;
-- [ ] Include an UI Platform to visualize the analysed data.
 
 ## Contributing
 
