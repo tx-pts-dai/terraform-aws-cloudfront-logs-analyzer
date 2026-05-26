@@ -10,6 +10,6 @@ permissions:
 
 jobs:
   release:
-    uses: tx-pts-dai/github-workflows/.github/workflows/gh-release.yaml@v2.5.1
+    uses: DND-IT/github-workflows/.github/workflows/gh-release.yaml@v2.5.1
     with:
       tag: ${{ github.ref_name }}
