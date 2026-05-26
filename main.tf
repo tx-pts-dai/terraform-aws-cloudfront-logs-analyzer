@@ -11,7 +11,7 @@ terraform {
 
 ## Locals
 locals {
-  distrubutions_ids     = join(",", var.cloudfront_distribution.ids)
+  distributions_ids     = join(",", var.cloudfront_distribution.ids)
   distribution_ids_name = length(var.cloudfront_distribution.ids) == 1 ? var.cloudfront_distribution.ids[0] : "multiple-ids"
   athena_workgroup_name = var.athena_workgroup.create ? (var.athena_workgroup.name != null ? var.athena_workgroup.name : "cloudfront-logs-${local.distribution_ids_name}") : null
 
@@ -23,7 +23,7 @@ locals {
 
   common_tags = {
     Environment      = var.environment
-    CF_Distributions = local.distrubutions_ids
+    CF_Distributions = local.distributions_ids
     CF_Name          = var.cloudfront_distribution.name != null ? var.cloudfront_distribution.name : "N/A"
   }
 }
