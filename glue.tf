@@ -56,7 +56,7 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
     "parquet.compression"              = "SNAPPY" # cannot be changed, enforced by AWS
     "projection.enabled"               = "true"
     "projection.distributionid.type"   = "enum"
-    "projection.distributionid.values" = local.distrubutions_ids
+    "projection.distributionid.values" = local.distributions_ids
     "projection.dt.type"               = "date"
     "projection.dt.range"              = "2020/01/01,NOW"
     "projection.dt.format"             = "yyyy/MM/dd"
