@@ -23,3 +23,8 @@ output "athena_named_queries" {
     "detect_outliers" = aws_athena_named_query.detect_outliers.id
   }
 }
+
+output "grafana_role_arn" {
+  description = "ARN of the IAM role for Grafana access"
+  value       = aws_iam_role.grafana[0].arn
+}

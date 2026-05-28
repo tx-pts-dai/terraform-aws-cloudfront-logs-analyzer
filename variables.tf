@@ -69,11 +69,17 @@ variable "grafana_access" {
   description = "Configuration for Grafana integration"
   type = object({
     create            = bool
-    name              = optional(string)
+    name              = optional(string, "cloudfront-logs-grafana-access")
+    trusted_role_arns = optional(list(string), [])
     custom_policy_arn = optional(string)
   })
   default = {
     create = false
+  }
+
+  validation {
+    condition     = !(var.grafana_access.create) || (length(var.grafana_access.trusted_role_arns) > 0)
+    error_message = "If grafana_access.create is true, you must provide either trusted_role_arns"
   }
 }
 

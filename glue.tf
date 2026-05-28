@@ -65,7 +65,7 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
     "projection.hour.type"             = "integer"
     "projection.hour.range"            = "0,23"
     "projection.hour.digits"           = "2"
-    "storage.location.template"        = "s3://${var.s3_parquet_bucket.name}/${var.s3_parquet_bucket.logs_prefix}$${distributionid}/$${dt}/$${hour}"
+    "storage.location.template"        = "s3://${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}$${distributionid}/$${dt}/$${hour}"
   }
 
   partition_keys {
@@ -84,7 +84,7 @@ resource "aws_glue_catalog_table" "cloudfront_logs_parquet" {
   }
 
   storage_descriptor {
-    location      = "s3://${var.s3_parquet_bucket.name}/${var.s3_parquet_bucket.logs_prefix}"
+    location      = "s3://${var.s3_parquet_bucket.name}/${local.s3_parquet_bucket_sanitized_prefix}"
     input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
 
