@@ -34,7 +34,7 @@ locals {
 ## S3 Bucket for Analysis Results (optional)
 module "s3_bucket_results" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "5.10.0"
+  version = "5.15.4"
 
   create_bucket = var.s3_results_bucket.create
 
