@@ -15,6 +15,7 @@ data "aws_region" "current" {}
 ## Locals
 locals {
   distributions_ids     = join(",", var.cloudfront_distribution.ids)
+  distributions_ids_tag = substr(join("_", var.cloudfront_distribution.ids), 0, 256)
   distribution_ids_name = length(var.cloudfront_distribution.ids) == 1 ? var.cloudfront_distribution.ids[0] : "multiple-ids"
   athena_workgroup_name = coalesce(var.athena_workgroup.name, "cloudfront-logs-${local.distribution_ids_name}")
 
@@ -26,7 +27,7 @@ locals {
 
   common_tags = {
     Environment      = var.environment
-    CF_Distributions = local.distributions_ids
+    CF_Distributions = local.distributions_ids_tag
     CF_Name          = var.cloudfront_distribution.name != null ? var.cloudfront_distribution.name : "N/A"
   }
 }
