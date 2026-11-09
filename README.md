@@ -161,26 +161,26 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 ### Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | terraform | >= 1.10 |
 | aws | >= 6.0 |
 
 ### Providers
 
 | Name | Version |
-|------|---------|
-| aws | 6.33.0 |
+| ---- | ------- |
+| aws | >= 6.0 |
 
 ### Modules
 
 | Name | Source | Version |
-|------|--------|---------|
-| s3\_bucket\_results | terraform-aws-modules/s3-bucket/aws | 5.10.0 |
+| ---- | ------ | ------- |
+| s3\_bucket\_results | terraform-aws-modules/s3-bucket/aws | 5.17.0 |
 
 ### Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_athena_named_query.custom_named_queries](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_named_query.detect_outliers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_workgroup.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_workgroup) | resource |
@@ -188,30 +188,36 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_glue_catalog_table.cloudfront_logs_parquet](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_geolocation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_whitelist](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
-| [aws_iam_policy.grafana_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.grafana_athena_query_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.grafana](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.attach_grafana_athena_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.grafana_athena_assume_role_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.grafana_athena_query_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ### Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | athena\_custom\_named\_queries | List of custom Athena named queries to create | ```list(object({ name = string description = optional(string) path_to_sql_file = string }))``` | `[]` | no |
-| athena\_workgroup | Configuration for the Athena workgroup | ```object({ create = bool name = optional(string) })``` | ```{ "create": false, "name": "primary" }``` | no |
+| athena\_workgroup | Configuration for the Athena workgroup | ```object({ create = bool name = optional(string) # ~2.5x the largest query observed on the Grafana dashboards (38 GB) bytes_scanned_cutoff_per_query = optional(number, 107374182400) })``` | ```{ "create": false, "name": "primary" }``` | no |
 | cloudfront\_distribution | The IDs of the CloudFront distributions to analyze logs for. | ```object({ name = optional(string, "global") ids = list(string) })``` | n/a | yes |
 | environment | Environment name (e.g., dev, staging, prod) | `string` | `"prod"` | no |
 | glue\_database | Name of the Glue database for CloudFront logs | ```object({ name = optional(string) })``` | `{}` | no |
-| grafana\_access | Configuration for Grafana integration | ```object({ create = bool name = optional(string) custom_policy_arn = optional(string) })``` | ```{ "create": false }``` | no |
+| grafana\_access | Configuration for Grafana integration | ```object({ create = bool name = optional(string, "cloudfront-logs-grafana-access") trusted_role_arns = optional(list(string), []) custom_policy_arn = optional(string) })``` | ```{ "create": false }``` | no |
 | s3\_parquet\_bucket | Configuration for the existing S3 bucket where CloudFront logs in Parquet format are stored | ```object({ name = string logs_prefix = string })``` | n/a | yes |
-| s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
-| s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
+| s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) results_expiration_days = optional(number, 30) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
+| s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_whitelist_format = optional(string, "parquet") ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 
 ### Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | athena\_named\_queries | Athena named queries |
 | glue\_database\_name | Name of the Glue database |
 | glue\_table\_cloudfront\_logs | Name of the CloudFront logs table |
+| grafana\_role\_arn | ARN of the IAM role for Grafana access |
 | s3\_results\_bucket | S3 bucket for analysis results |
 <!-- END_TF_DOCS -->
