@@ -31,10 +31,11 @@ variable "s3_parquet_bucket" {
 variable "s3_results_bucket" {
   description = "Configuration for the S3 bucket where analysis results will be stored"
   type = object({
-    create          = bool
-    name            = optional(string)
-    output_prefix   = optional(string)
-    lifecycle_rules = optional(list(any), [])
+    create                  = bool
+    name                    = optional(string)
+    output_prefix           = optional(string)
+    results_expiration_days = optional(number, 30)
+    lifecycle_rules         = optional(list(any), [])
   })
 }
 
@@ -90,6 +91,8 @@ variable "athena_workgroup" {
   type = object({
     create = bool
     name   = optional(string)
+    # ~2.5x the largest query observed on the Grafana dashboards (38 GB)
+    bytes_scanned_cutoff_per_query = optional(number, 107374182400)
   })
   default = {
     create = false

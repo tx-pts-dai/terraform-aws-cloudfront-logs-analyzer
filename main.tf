@@ -45,7 +45,12 @@ module "s3_bucket_results" {
     enabled = false
   }
 
-  lifecycle_rule = var.s3_results_bucket.lifecycle_rules
+  lifecycle_rule = concat([{
+    id         = "athena-results"
+    enabled    = true
+    filter     = { prefix = local.s3_results_bucket_prefix }
+    expiration = { days = var.s3_results_bucket.results_expiration_days }
+  }], var.s3_results_bucket.lifecycle_rules)
 
   server_side_encryption_configuration = {
     rule = {
