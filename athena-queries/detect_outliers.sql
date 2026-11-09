@@ -8,7 +8,7 @@ WITH params AS (
     0            AS from_hour,
     23           AS to_hour,
     1000      AS threshold_requests,
-    "CHANGE"  AS distribution_id
+    'CHANGE'  AS distribution_id
 ),
 
 -- 1 Preprocess timestamp and filter out whitelisted IPs
@@ -19,7 +19,7 @@ base AS (
   CROSS JOIN params p
   WHERE l.dt BETWEEN p.from_dt AND p.to_dt
     AND l.hour BETWEEN p.from_hour AND p.to_hour
-    AND l.distribution_id = p.distribution_id -- filter for specific distribution if needed
+    AND l.distributionid = p.distribution_id -- filter for specific distribution if needed
     AND l.timestamp IS NOT NULL       -- needed in case parquet file doesn't have this field populated
     -- filter out IPs in whitelist
     AND NOT EXISTS (
