@@ -259,3 +259,239 @@ resource "aws_glue_catalog_table" "ip_geolocation" {
     aws_glue_catalog_database.cloudfront_logs
   ]
 }
+
+## Summaries tables (var.summaries.enable)
+
+resource "aws_glue_catalog_table" "robots_agents" {
+  count = var.summaries.enable ? 1 : 0
+
+  name          = "robots_agents"
+  database_name = aws_glue_catalog_database.cloudfront_logs.name
+  description   = "Robots.txt agent tokens used to classify user agents"
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = merge(
+    {
+      "EXTERNAL"           = "TRUE"
+      "has_encrypted_data" = "false"
+    },
+    local.glue_format_configs.json.table_params
+  )
+
+  storage_descriptor {
+    location      = "s3://${local.s3_results_bucket_name}/supporters/robots-agents/"
+    input_format  = local.glue_format_configs.json.input_format
+    output_format = local.glue_format_configs.json.output_format
+
+    ser_de_info {
+      name                  = "json"
+      serialization_library = local.glue_format_configs.json.serde_library
+      parameters            = local.glue_format_configs.json.serde_params
+    }
+
+    dynamic "columns" {
+      for_each = [
+        { name = "token", type = "string" },
+        { name = "operator", type = "string" },
+        { name = "purpose", type = "string" },
+        { name = "notes", type = "string" },
+      ]
+      content {
+        name = columns.value.name
+        type = columns.value.type
+      }
+    }
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.cloudfront_logs
+  ]
+}
+
+resource "aws_glue_catalog_table" "ua_dim" {
+  count = var.summaries.enable ? 1 : 0
+
+  name          = "ua_dim"
+  database_name = aws_glue_catalog_database.cloudfront_logs.name
+  description   = "Classified user agents, one row per raw cs_user_agent"
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = merge(
+    {
+      "EXTERNAL"           = "TRUE"
+      "has_encrypted_data" = "false"
+    },
+    local.glue_format_configs.json.table_params
+  )
+
+  storage_descriptor {
+    location      = "s3://${local.s3_results_bucket_name}/ua_dim/"
+    input_format  = local.glue_format_configs.json.input_format
+    output_format = local.glue_format_configs.json.output_format
+
+    ser_de_info {
+      name                  = "json"
+      serialization_library = local.glue_format_configs.json.serde_library
+      parameters            = local.glue_format_configs.json.serde_params
+    }
+
+    dynamic "columns" {
+      for_each = [
+        { name = "cs_user_agent", type = "string" },
+        { name = "ua", type = "string" },
+        { name = "family", type = "string" },
+        { name = "os", type = "string" },
+        { name = "device", type = "string" },
+        { name = "is_bot", type = "boolean" },
+        { name = "agent", type = "string" },
+        { name = "robots_token", type = "string" },
+        { name = "parser_version", type = "string" },
+        { name = "first_seen", type = "string" },
+      ]
+      content {
+        name = columns.value.name
+        type = columns.value.type
+      }
+    }
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.cloudfront_logs
+  ]
+}
+
+resource "aws_glue_catalog_table" "cf_ua_hourly" {
+  count = var.summaries.enable ? 1 : 0
+
+  name          = "cf_ua_hourly"
+  database_name = aws_glue_catalog_database.cloudfront_logs.name
+  description   = "Hourly requests, bytes and time taken per user agent"
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = {
+    "EXTERNAL"                    = "TRUE"
+    "parquet.compression"         = "SNAPPY"
+    "projection.enabled"          = "true"
+    "projection.dt.type"          = "date"
+    "projection.dt.range"         = "2020-01-01,NOW"
+    "projection.dt.format"        = "yyyy-MM-dd"
+    "projection.dt.interval"      = "1"
+    "projection.dt.interval.unit" = "DAYS"
+    "projection.hour.type"        = "integer"
+    "projection.hour.range"       = "0,23"
+    "projection.hour.digits"      = "2"
+    "storage.location.template"   = "s3://${local.s3_results_bucket_name}/summaries/cf_ua_hourly/dt=$${dt}/hour=$${hour}"
+  }
+
+  partition_keys {
+    name = "dt"
+    type = "string"
+  }
+
+  partition_keys {
+    name = "hour"
+    type = "int"
+  }
+
+  storage_descriptor {
+    location      = "s3://${local.s3_results_bucket_name}/summaries/cf_ua_hourly/"
+    input_format  = local.glue_format_configs.parquet.input_format
+    output_format = local.glue_format_configs.parquet.output_format
+
+    ser_de_info {
+      name                  = "ParquetHiveSerDe"
+      serialization_library = local.glue_format_configs.parquet.serde_library
+      parameters            = local.glue_format_configs.parquet.serde_params
+    }
+
+    dynamic "columns" {
+      for_each = [
+        { name = "distributionid", type = "string" },
+        { name = "host", type = "string" },
+        { name = "cs_user_agent", type = "string" },
+        { name = "status_class", type = "string" },
+        { name = "edge_result_type", type = "string" },
+        { name = "requests", type = "bigint" },
+        { name = "bytes", type = "bigint" },
+        { name = "time_taken_sum", type = "double" },
+      ]
+      content {
+        name = columns.value.name
+        type = columns.value.type
+      }
+    }
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.cloudfront_logs
+  ]
+}
+
+resource "aws_glue_catalog_table" "cf_bot_errors_hourly" {
+  count = var.summaries.enable ? 1 : 0
+
+  name          = "cf_bot_errors_hourly"
+  database_name = aws_glue_catalog_database.cloudfront_logs.name
+  description   = "Hourly 4xx/5xx requests from bots per path"
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = {
+    "EXTERNAL"                    = "TRUE"
+    "parquet.compression"         = "SNAPPY"
+    "projection.enabled"          = "true"
+    "projection.dt.type"          = "date"
+    "projection.dt.range"         = "2020-01-01,NOW"
+    "projection.dt.format"        = "yyyy-MM-dd"
+    "projection.dt.interval"      = "1"
+    "projection.dt.interval.unit" = "DAYS"
+    "projection.hour.type"        = "integer"
+    "projection.hour.range"       = "0,23"
+    "projection.hour.digits"      = "2"
+    "storage.location.template"   = "s3://${local.s3_results_bucket_name}/summaries/cf_bot_errors_hourly/dt=$${dt}/hour=$${hour}"
+  }
+
+  partition_keys {
+    name = "dt"
+    type = "string"
+  }
+
+  partition_keys {
+    name = "hour"
+    type = "int"
+  }
+
+  storage_descriptor {
+    location      = "s3://${local.s3_results_bucket_name}/summaries/cf_bot_errors_hourly/"
+    input_format  = local.glue_format_configs.parquet.input_format
+    output_format = local.glue_format_configs.parquet.output_format
+
+    ser_de_info {
+      name                  = "ParquetHiveSerDe"
+      serialization_library = local.glue_format_configs.parquet.serde_library
+      parameters            = local.glue_format_configs.parquet.serde_params
+    }
+
+    dynamic "columns" {
+      for_each = [
+        { name = "distributionid", type = "string" },
+        { name = "host", type = "string" },
+        { name = "path", type = "string" },
+        { name = "cs_user_agent", type = "string" },
+        { name = "sc_status", type = "string" },
+        { name = "requests", type = "bigint" },
+      ]
+      content {
+        name = columns.value.name
+        type = columns.value.type
+      }
+    }
+  }
+
+  depends_on = [
+    aws_glue_catalog_database.cloudfront_logs
+  ]
+}

@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = ">= 2.0"
+    }
   }
 }
 
@@ -182,6 +186,10 @@ data "aws_iam_policy_document" "grafana_athena_query_policy" {
       ],
       [for t in aws_glue_catalog_table.ip_whitelist : t.arn],
       [for t in aws_glue_catalog_table.ip_geolocation : t.arn],
+      [for t in aws_glue_catalog_table.robots_agents : t.arn],
+      [for t in aws_glue_catalog_table.ua_dim : t.arn],
+      [for t in aws_glue_catalog_table.cf_ua_hourly : t.arn],
+      [for t in aws_glue_catalog_table.cf_bot_errors_hourly : t.arn],
     )
   }
 
