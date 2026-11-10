@@ -1,7 +1,9 @@
 """Hourly UA summarizer Lambda.
 
 Scheduled hourly; processes the previous UTC hour. Finds user agents not yet in
-ua_dim, classifies them with ua-parser and the robots_agents tokens, and appends
+ua_dim that reached MIN_DAILY_REQUESTS requests in the UTC day so far, classifies
+them with ua-parser and the robots_agents tokens (requests from UAs below the
+threshold stay in cf_ua_hourly unclassified), and appends
 them as gzip JSONL to ua_dim/. Then deletes and re-UNLOADs the hour partitions of
 cf_ua_hourly and cf_bot_errors_hourly.
 
@@ -10,18 +12,24 @@ Events:
   {"dt": "YYYY-MM-DD", "hour": H}  one hour
   {"dt": "YYYY-MM-DD"}          whole day
   {"reparse": true}             rewrite ua_dim with the current parser/tokens
+
+Tokens come from the explicit robots_agents JSONL plus, when ROBOTS_URL is set,
+the user-agents of that robots.txt.
 """
+import codecs
+import csv
 import gzip
 import hashlib
 import json
 import os
 import re
 import time
+import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import version
-from typing import Any
-from urllib.parse import unquote
+from typing import Any, Iterator
+from urllib.parse import unquote, urlparse
 
 import boto3
 from ua_parser import parse
@@ -31,8 +39,12 @@ WORKGROUP = os.environ.get("WORKGROUP", "")
 OUTPUT_LOCATION = os.environ.get("OUTPUT_LOCATION", "")
 RESULTS_BUCKET = os.environ.get("RESULTS_BUCKET", "")
 ROBOTS_KEY = os.environ.get("ROBOTS_KEY", "")
+ROBOTS_URL = os.environ.get("ROBOTS_URL", "")
+MIN_DAILY_REQUESTS = int(os.environ.get("MIN_DAILY_REQUESTS", "100"))
 
 UA_DIM_PREFIX = "ua_dim/"
+REPARSE_CHUNK = 100_000
+USER_AGENT_LINE_RE = re.compile(r"^\s*user-agent:([^#\r\n]*)", re.I | re.M)
 SUMMARIES = ("cf_ua_hourly", "cf_bot_errors_hourly")
 
 AGENT_RE = re.compile(
@@ -44,9 +56,10 @@ NEW_UAS_SQL = """
 SELECT r.cs_user_agent, min(r.hour) AS first_hour
 FROM cloudfront_logs_parquet r
 LEFT JOIN ua_dim d ON r.cs_user_agent = d.cs_user_agent
-WHERE r.dt = ? AND r.hour BETWEEN ? AND ?
+WHERE r.dt = ? AND r.hour <= ?
   AND r.cs_user_agent IS NOT NULL AND d.cs_user_agent IS NULL
 GROUP BY r.cs_user_agent
+HAVING count(*) >= ?
 """
 
 # partitioned_by columns must be last in the SELECT; hour is zero-padded to match the "hour=HH" projection template
@@ -94,6 +107,8 @@ def parse_event(event: dict[str, Any], now: datetime) -> tuple[str, int, int] | 
     if event.get("reparse") is True:
         return None
     if "dt" not in event:
+        if "scheduled_time" in event:
+            now = datetime.fromisoformat(event["scheduled_time"])
         prev = now.astimezone(timezone.utc) - timedelta(hours=1)
         return prev.strftime("%Y-%m-%d"), prev.hour, prev.hour
     dt = datetime.strptime(event["dt"], "%Y-%m-%d").strftime("%Y-%m-%d")
@@ -135,10 +150,46 @@ def parser_version(tokens: list[str]) -> str:
     return f"ua-parser-{version('ua-parser')}+builtins-{version('ua-parser-builtins')}+{digest}"
 
 
-def load_tokens() -> list[str]:
-    """Read robots tokens from the robots_agents JSONL in S3."""
-    body = s3.get_object(Bucket=RESULTS_BUCKET, Key=ROBOTS_KEY)["Body"].read().decode()
+def parse_robots_txt(text: str) -> list[str]:
+    """Return distinct user-agent tokens of a robots.txt, in order, without '*'."""
+    found = (m.strip() for m in USER_AGENT_LINE_RE.findall(text))
+    return list(dict.fromkeys(t for t in found if t and t != "*"))
+
+
+def merge_tokens(explicit: list[str], from_url: list[str]) -> list[str]:
+    """Explicit tokens first; URL tokens are added unless equal (case-insensitive) to an explicit one."""
+    seen = {t.lower() for t in explicit}
+    return explicit + [t for t in from_url if t.lower() not in seen]
+
+
+def read_tokens(key: str) -> list[str] | None:
+    """Read tokens from a robots_agents JSONL in S3; None if the key does not exist."""
+    try:
+        body = s3.get_object(Bucket=RESULTS_BUCKET, Key=key)["Body"].read().decode()
+    except s3.exceptions.NoSuchKey:
+        return None
     return [json.loads(line)["token"] for line in body.splitlines() if line.strip()]
+
+
+def url_tokens() -> list[str]:
+    """Fetch tokens from ROBOTS_URL; empty on any failure."""
+    if not ROBOTS_URL:
+        return []
+    try:
+        if urlparse(ROBOTS_URL).scheme not in ("http", "https"):
+            raise ValueError(f"unsupported scheme in {ROBOTS_URL}")
+        req = urllib.request.Request(ROBOTS_URL, headers={"User-Agent": "cf-logs-summarizer"})
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+            return parse_robots_txt(resp.read().decode("utf-8", errors="replace"))
+    except Exception as e:  # noqa: BLE001
+        print(f"WARNING: robots.txt fetch failed ({e}); using explicit tokens only")
+        return []
+
+
+def load_tokens() -> list[str]:
+    """Explicit robots tokens from S3 merged with those of ROBOTS_URL."""
+    explicit = read_tokens(ROBOTS_KEY) or []
+    return merge_tokens(explicit, url_tokens())
 
 
 def run_query(sql: str, params: list[str] | None = None, deadline: float | None = None) -> str:
@@ -181,6 +232,11 @@ def range_params(dt: str, lo: int, hi: int) -> list[str]:
     return [f"'{dt.replace('-', '/')}'", str(lo), str(hi)]
 
 
+def new_uas_params(dt: str, hi: int) -> list[str]:
+    """Build Athena parameters for NEW_UAS_SQL: the day so far up to hour hi."""
+    return [f"'{dt.replace('-', '/')}'", str(hi), str(MIN_DAILY_REQUESTS)]
+
+
 def list_keys(prefix: str) -> list[str]:
     """List all S3 keys under a prefix."""
     pages = s3.get_paginator("list_objects_v2").paginate(Bucket=RESULTS_BUCKET, Prefix=prefix)
@@ -203,8 +259,8 @@ def write_ua_dim(rows: list[dict[str, Any]], name: str) -> str:
 
 
 def add_new_uas(dt: str, lo: int, hi: int, tokens: list[str], deadline: float | None = None) -> int:
-    """Classify UAs not yet in ua_dim for the range and append them; return the count."""
-    rows = fetch_rows(run_query(NEW_UAS_SQL, range_params(dt, lo, hi), deadline))
+    """Classify UAs not yet in ua_dim that reached MIN_DAILY_REQUESTS in the day so far; return the count."""
+    rows = fetch_rows(run_query(NEW_UAS_SQL, new_uas_params(dt, hi), deadline))
     pv = parser_version(tokens)
     out = [
         classify(raw, tokens) | {"parser_version": pv, "first_seen": f"{dt} {int(h):02d}"}
@@ -215,25 +271,55 @@ def add_new_uas(dt: str, lo: int, hi: int, tokens: list[str], deadline: float | 
     return len(out)
 
 
-def reparse(tokens: list[str]) -> int:
-    """Re-classify all ua_dim rows into a single object; return the row count."""
+REPARSE_SQL = """
+SELECT cs_user_agent, min(first_seen) AS first_seen
+FROM ua_dim
+WHERE cs_user_agent IS NOT NULL
+GROUP BY 1
+"""
+
+
+def stream_results(qid: str) -> Iterator[list[str]]:
+    """Yield the rows of a query result CSV from S3, without the header."""
+    out = athena.get_query_execution(QueryExecutionId=qid)["QueryExecution"]["ResultConfiguration"]["OutputLocation"]
+    u = urlparse(out)
+    body = s3.get_object(Bucket=u.netloc, Key=u.path.lstrip("/"))["Body"]
+    reader = csv.reader(codecs.getreader("utf-8")(body))
+    next(reader, None)
+    yield from reader
+
+
+def reparse(tokens: list[str], deadline: float | None = None) -> int:
+    """Re-classify all ua_dim rows in constant memory; return the row count."""
     old_keys = list_keys(UA_DIM_PREFIX)
     pv = parser_version(tokens)
-    # ponytail: all ua_dim rows held in memory (~1M UAs would exceed 1024 MB); stream to /tmp and upload_file
-    first_seen: dict[str, str] = {}
-    for key in old_keys:
-        raw = s3.get_object(Bucket=RESULTS_BUCKET, Key=key)["Body"].read()
-        body = (gzip.decompress(raw) if key.endswith(".gz") else raw).decode()
-        for line in body.splitlines():
-            if line.strip():
-                old = json.loads(line)
-                ua = old["cs_user_agent"]
-                first_seen[ua] = min(first_seen.get(ua, old["first_seen"]), old["first_seen"])
-    out = [classify(ua, tokens) | {"parser_version": pv, "first_seen": fs} for ua, fs in first_seen.items()]
-    if out:
-        new_key = write_ua_dim(out, f"reparse-{uuid.uuid4().hex[:8]}")
-        delete_keys([k for k in old_keys if k != new_key])
-    return len(out)
+    run_id = uuid.uuid4().hex[:8]
+    qid = run_query(REPARSE_SQL, deadline=deadline)
+    new_keys: list[str] = []
+    chunk: list[dict[str, Any]] = []
+    total = 0
+
+    def flush() -> None:
+        nonlocal chunk, total
+        if deadline is not None and time.monotonic() > deadline:
+            raise RuntimeError("reparse stopped: Lambda out of time")
+        new_keys.append(write_ua_dim(chunk, f"reparse-{run_id}-{len(new_keys):04d}"))
+        total += len(chunk)
+        chunk = []
+
+    try:
+        for ua, first_seen in stream_results(qid):
+            chunk.append(classify(ua, tokens) | {"parser_version": pv, "first_seen": first_seen})
+            if len(chunk) == REPARSE_CHUNK:
+                flush()
+        if chunk:
+            flush()
+    except BaseException:
+        delete_keys(new_keys)
+        raise
+    if new_keys:
+        delete_keys(old_keys)
+    return total
 
 
 def rebuild_summaries(dt: str, lo: int, hi: int, deadline: float | None = None) -> None:
@@ -250,10 +336,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entry point."""
     tokens = load_tokens()
     target = parse_event(event, datetime.now(timezone.utc))
-    if target is None:
-        return {"reparsed": reparse(tokens)}
-    dt, lo, hi = target
     deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - 20
+    if target is None:
+        return {"reparsed": reparse(tokens, deadline)}
+    dt, lo, hi = target
     added = add_new_uas(dt, lo, hi, tokens, deadline)
     rebuild_summaries(dt, lo, hi, deadline)
     return {"dt": dt, "hours": [lo, hi], "new_uas": added}

@@ -52,4 +52,13 @@ for bad in ({"dt": "2026-3-5x"}, {"dt": "2026-03-05", "hour": 24}, {"dt": "2026-
     raise AssertionError(bad)
 
 assert handler.range_params("2026-03-05", 0, 23) == ["'2026/03/05'", "0", "23"]
+txt = "User-agent: *\r\nDisallow: /x\r\nUser-Agent: Sogou web spider\r\nuser-agent:GPTBot \r\nUSER-AGENT: GPTBot\r\n# user-agent: no\r\n"
+assert handler.parse_robots_txt(txt) == ["Sogou web spider", "GPTBot"], handler.parse_robots_txt(txt)
+assert handler.parse_robots_txt("") == []
+assert handler.parse_robots_txt("User-agent: Foo # c\n  user-agent: Bar\nUser-agent:\n") == ["Foo", "Bar"]
+assert handler.parse_event({"scheduled_time": "2026-11-10T00:20:00Z"}, now) == ("2026-11-09", 23, 23)
+assert handler.parse_event({"scheduled_time": "2026-11-10T13:20:00Z"}, now) == ("2026-11-10", 12, 12)
+assert handler.merge_tokens(["GPTBot", "Googlebot"], ["gptbot", "Sogou web spider"]) == ["GPTBot", "Googlebot", "Sogou web spider"]
+assert handler.classify("Sogou web spider/4.0", ["Sogou web spider"])["robots_token"] == "Sogou web spider"
+assert handler.new_uas_params("2026-03-05", 7) == ["'2026/03/05'", "7", "100"]
 print("ok")
