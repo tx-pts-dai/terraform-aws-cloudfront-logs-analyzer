@@ -1,3 +1,16 @@
+"""Hourly UA summarizer Lambda.
+
+Scheduled hourly; processes the previous UTC hour. Finds user agents not yet in
+ua_dim, classifies them with ua-parser and the robots_agents tokens, and appends
+them as JSONL to ua_dim/. Then deletes and re-UNLOADs the hour partitions of
+cf_ua_hourly and cf_bot_errors_hourly.
+
+Events:
+  {}                            previous hour
+  {"dt": "YYYY-MM-DD", "hour": H}  one hour
+  {"dt": "YYYY-MM-DD"}          whole day
+  {"reparse": true}             rewrite ua_dim with the current parser/tokens
+"""
 import hashlib
 import json
 import os
@@ -92,12 +105,14 @@ def parse_event(event: dict[str, Any], now: datetime) -> tuple[str, int, int] | 
 
 
 def match_token(ua: str, tokens: list[str]) -> str:
+    """Return the longest robots token contained in the UA, or ''."""
     low = ua.lower()
     hits = [t for t in tokens if t.lower() in low]
     return max(hits, key=len) if hits else ""
 
 
 def classify(raw: str, tokens: list[str]) -> dict[str, Any]:
+    """Classify a raw user agent into a ua_dim row."""
     ua = unquote(raw)
     r = parse(ua).with_defaults()
     m = AGENT_RE.search(ua.lower())
@@ -114,16 +129,19 @@ def classify(raw: str, tokens: list[str]) -> dict[str, Any]:
 
 
 def parser_version(tokens: list[str]) -> str:
+    """Version string from the ua-parser release and a hash of the tokens."""
     digest = hashlib.sha256("\n".join(sorted(tokens)).encode()).hexdigest()[:8]
-    return f"ua-parser-{version('ua-parser')}+{digest}"
+    return f"ua-parser-{version('ua-parser')}+builtins-{version('ua-parser-builtins')}+{digest}"
 
 
 def load_tokens() -> list[str]:
+    """Read robots tokens from the robots_agents JSONL in S3."""
     body = s3.get_object(Bucket=RESULTS_BUCKET, Key=ROBOTS_KEY)["Body"].read().decode()
     return [json.loads(line)["token"] for line in body.splitlines() if line.strip()]
 
 
-def run_query(sql: str, params: list[str] | None = None) -> str:
+def run_query(sql: str, params: list[str] | None = None, deadline: float | None = None) -> str:
+    """Run an Athena query and wait for it; stop it and raise if the monotonic deadline passes."""
     kwargs: dict[str, Any] = {
         "QueryString": sql,
         "QueryExecutionContext": {"Database": DATABASE},
@@ -141,11 +159,15 @@ def run_query(sql: str, params: list[str] | None = None) -> str:
             return qid
         if state in ("FAILED", "CANCELLED"):
             raise RuntimeError(f"Athena query {qid} {state}: {status.get('StateChangeReason', '')}")
+        if deadline is not None and time.monotonic() > deadline:
+            athena.stop_query_execution(QueryExecutionId=qid)
+            raise RuntimeError(f"Athena query {qid} stopped: Lambda out of time")
         time.sleep(delay)
         delay = min(delay * 1.5, 10.0)
 
 
 def fetch_rows(qid: str) -> list[list[str]]:
+    """Return result rows of a query, without the header."""
     rows: list[list[str]] = []
     pages = athena.get_paginator("get_query_results").paginate(QueryExecutionId=qid)
     for page in pages:
@@ -154,29 +176,34 @@ def fetch_rows(qid: str) -> list[list[str]]:
 
 
 def range_params(dt: str, lo: int, hi: int) -> list[str]:
+    """Build Athena parameters for a dt and hour range."""
     return [f"'{dt.replace('-', '/')}'", str(lo), str(hi)]
 
 
 def list_keys(prefix: str) -> list[str]:
+    """List all S3 keys under a prefix."""
     pages = s3.get_paginator("list_objects_v2").paginate(Bucket=RESULTS_BUCKET, Prefix=prefix)
     return [o["Key"] for p in pages for o in p.get("Contents", [])]
 
 
 def delete_keys(keys: list[str]) -> None:
+    """Delete S3 keys in batches of 1000."""
     for i in range(0, len(keys), 1000):
         batch = [{"Key": k} for k in keys[i : i + 1000]]
         s3.delete_objects(Bucket=RESULTS_BUCKET, Delete={"Objects": batch, "Quiet": True})
 
 
 def write_ua_dim(rows: list[dict[str, Any]], name: str) -> str:
+    """Write rows as one JSONL object under ua_dim/ and return its key."""
     key = f"{UA_DIM_PREFIX}{name}.jsonl"
     body = "".join(json.dumps(r) + "\n" for r in rows)
     s3.put_object(Bucket=RESULTS_BUCKET, Key=key, Body=body.encode())
     return key
 
 
-def add_new_uas(dt: str, lo: int, hi: int, tokens: list[str]) -> int:
-    rows = fetch_rows(run_query(NEW_UAS_SQL, range_params(dt, lo, hi)))
+def add_new_uas(dt: str, lo: int, hi: int, tokens: list[str], deadline: float | None = None) -> int:
+    """Classify UAs not yet in ua_dim for the range and append them; return the count."""
+    rows = fetch_rows(run_query(NEW_UAS_SQL, range_params(dt, lo, hi), deadline))
     pv = parser_version(tokens)
     out = [
         classify(raw, tokens) | {"parser_version": pv, "first_seen": f"{dt} {int(h):02d}"}
@@ -188,36 +215,43 @@ def add_new_uas(dt: str, lo: int, hi: int, tokens: list[str]) -> int:
 
 
 def reparse(tokens: list[str]) -> int:
+    """Re-classify all ua_dim rows into a single object; return the row count."""
     old_keys = list_keys(UA_DIM_PREFIX)
     pv = parser_version(tokens)
-    out: list[dict[str, Any]] = []
+    # ponytail: all ua_dim rows held in memory (~1M UAs would exceed 1024 MB); stream to /tmp and upload_file
+    first_seen: dict[str, str] = {}
     for key in old_keys:
         body = s3.get_object(Bucket=RESULTS_BUCKET, Key=key)["Body"].read().decode()
         for line in body.splitlines():
             if line.strip():
                 old = json.loads(line)
-                out.append(classify(old["cs_user_agent"], tokens) | {"parser_version": pv, "first_seen": old["first_seen"]})
+                ua = old["cs_user_agent"]
+                first_seen[ua] = min(first_seen.get(ua, old["first_seen"]), old["first_seen"])
+    out = [classify(ua, tokens) | {"parser_version": pv, "first_seen": fs} for ua, fs in first_seen.items()]
     if out:
         new_key = write_ua_dim(out, f"reparse-{uuid.uuid4().hex[:8]}")
         delete_keys([k for k in old_keys if k != new_key])
     return len(out)
 
 
-def rebuild_summaries(dt: str, lo: int, hi: int) -> None:
+def rebuild_summaries(dt: str, lo: int, hi: int, deadline: float | None = None) -> None:
+    """Delete and re-UNLOAD the summary partitions for the range."""
     for table in SUMMARIES:
         delete_keys(
             [k for h in range(lo, hi + 1) for k in list_keys(f"summaries/{table}/dt={dt}/hour={h:02d}/")]
         )
         location = f"s3://{RESULTS_BUCKET}/summaries/{table}/"
-        run_query(UNLOAD_SQL[table].format(location=location), range_params(dt, lo, hi))
+        run_query(UNLOAD_SQL[table].format(location=location), range_params(dt, lo, hi), deadline)
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """Lambda entry point."""
     tokens = load_tokens()
     target = parse_event(event, datetime.now(timezone.utc))
     if target is None:
         return {"reparsed": reparse(tokens)}
     dt, lo, hi = target
-    added = add_new_uas(dt, lo, hi, tokens)
-    rebuild_summaries(dt, lo, hi)
+    deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - 20
+    added = add_new_uas(dt, lo, hi, tokens, deadline)
+    rebuild_summaries(dt, lo, hi, deadline)
     return {"dt": dt, "hours": [lo, hi], "new_uas": added}

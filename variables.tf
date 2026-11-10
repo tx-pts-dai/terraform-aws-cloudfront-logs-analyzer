@@ -117,6 +117,8 @@ variable "summaries" {
   type = object({
     enable   = bool
     schedule = optional(string, "cron(20 * * * ? *)")
+
+    robots_agents_url = optional(string)
     robots_agents = optional(list(object({
       token    = string
       operator = string

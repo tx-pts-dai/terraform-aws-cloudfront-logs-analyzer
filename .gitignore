@@ -41,5 +41,4 @@ override.tf.json
 .DS_Store
 
 # Summarizer Lambda build artifacts
-summarizer/layer/
-summarizer/*.zip
+summarizer/function.zip
