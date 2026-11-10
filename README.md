@@ -3,11 +3,17 @@
 This module provides a AWS resources and helper scripts to analyze CloudFront Parquet logs using AWS Glue and Athena.
 
 ## Basic Usage
+
+Replace `x.y.z` with the release that includes the inputs used (`summaries`, `athena_workgroup`, `results_expiration_days` need the next release after 0.3.1).
 Minimal
 ```
 module "global_logs_analyzer" {
-  source  = "tx-pts-dai/cloudront/logs-analyzer"
-  version = "2.0.0"
+  source  = "tx-pts-dai/cloudfront-logs-analyzer/aws"
+  version = "x.y.z"
+
+  cloudfront_distribution = {
+    ids = ["{distribution-id}"]
+  }
 
   s3_parquet_bucket = {
     name = "my-logs-abc"
@@ -22,8 +28,12 @@ module "global_logs_analyzer" {
 Global
 ```
 module "global_logs_analyzer" {
-  source  = "tx-pts-dai/cloudront/logs-analyzer"
-  version = "x.x.x"
+  source  = "tx-pts-dai/cloudfront-logs-analyzer/aws"
+  version = "x.y.z"
+
+  cloudfront_distribution = {
+    ids = ["{distribution-id}"]
+  }
 
   s3_parquet_bucket = {
     name = "my-logs-abc"
@@ -37,8 +47,8 @@ module "global_logs_analyzer" {
   # Do not place both files in the same folder
   # Athena would mix them up due to common column names
   s3_supporters_files = {
-    ip_whitelist_fullpath = "s3://arn/full/path/to/folder"
-    ip_whitelist_fullpath = "s3://arn/full/path/to/folder2"
+    ip_whitelist_fullpath   = "s3://arn/full/path/to/folder"
+    ip_geolocation_fullpath = "s3://arn/full/path/to/folder2"
   }
  
   grafana_access = {
@@ -50,11 +60,11 @@ module "global_logs_analyzer" {
 Per Distribution
 ```
 module "per_distrologs_analyzer" {
-  source  = "tx-pts-dai/cloudront/logs-analyzer"
-  version = "x.x.x"
+  source  = "tx-pts-dai/cloudfront-logs-analyzer/aws"
+  version = "x.y.z"
 
   cloudfront_distribution = {
-    id   = "{distribution-id-to-analyze}"
+    ids  = ["{distribution-id-to-analyze}"]
     name = "DistroName"
   }
 
@@ -70,8 +80,8 @@ module "per_distrologs_analyzer" {
   # Do not place both files in the same folder
   # Athena would mix them up due to common column names
   s3_supporters_files = {
-    ip_whitelist_fullpath = "s3://arn/full/path/to/folder"
-    ip_whitelist_fullpath = "s3://arn/full/path/to/folder2"
+    ip_whitelist_fullpath   = "s3://arn/full/path/to/folder"
+    ip_geolocation_fullpath = "s3://arn/full/path/to/folder2"
   }
 
   grafana_access = {
@@ -80,8 +90,41 @@ module "per_distrologs_analyzer" {
 }
 ```
 
+With UA summaries and workgroup guardrails (all optional)
+```
+module "global_logs_analyzer" {
+  source  = "tx-pts-dai/cloudfront-logs-analyzer/aws"
+  version = "x.y.z"
+
+  cloudfront_distribution = {
+    ids = ["{distribution-id}"]
+  }
+
+  s3_parquet_bucket = {
+    name = "my-logs-abc"
+    logs_prefix = "AWSLogs/{account_id}/Cloudfront/"
+  }
+
+  s3_results_bucket = {
+    create                  = true
+    results_expiration_days = 30 # athena-results/ only, default 30
+  }
+
+  athena_workgroup = {
+    create                         = true
+    bytes_scanned_cutoff_per_query = 107374182400 # default 100 GB
+  }
+
+  summaries = {
+    enable            = true
+    robots_agents_url = "https://www.tagesanzeiger.ch/robots.txt"
+  }
+}
+```
+
 ### What is here
 - `*.tf` — Terraform resources to create a Glue database + tables, Athena workgroups/named queries, and optional S3 result buckets.
+- `summarizer/` — Lambda (`handler.py`) and layer for the optional hourly UA summaries.
 - `athena-queries/` — reusable SQL queries and templates (e.g. `detect_outliers.sql`).
 - `scripts/` — small Python utilities: `jsonl_to_parquet.py` (convert JSONL support files to Parquet), helpers for generating whitelist/geolocation Parquet, and README.
 
@@ -131,6 +174,121 @@ flowchart TB
   style AthenaQueries stroke:#888
   style UI stroke:#888
 ```
+
+## UA summaries
+
+Optional (`summaries.enable = true`). An hourly Lambda classifies user agents and pre-aggregates the logs into small Parquet tables, so dashboards do not scan the raw logs.
+
+```mermaid
+flowchart LR
+  CF[CloudFront] -->|Parquet logs| Logs[(Log bucket<br>cloudfront_logs_parquet)]
+  Sched[EventBridge Scheduler<br>hourly at :20 UTC] --> Fn[Summarizer Lambda]
+  Fn -->|queries| Ath[Athena workgroup]
+  Ath -->|reads| Logs
+  Robots[(robots_agents<br>S3 object)] -->|tokens| Fn
+  TF[Terraform<br>var list + robots.txt URL] -.->|plan: fetch URL / apply: write object| Robots
+  Fn -->|writes JSONL.gz| UA[(ua_dim/)]
+  Ath -->|UNLOAD Parquet| Sum[(summaries/<br>cf_ua_hourly<br>cf_bot_errors_hourly)]
+  UA --> Glue[Glue tables]
+  Sum --> Glue
+  Glue --> Graf[Grafana]
+```
+
+### Run behaviour
+
+- Processes the previous UTC hour (schedule `cron(20 * * * ? *)`, `summaries.schedule`).
+- Step 1: user agents not yet in `ua_dim` are classified and appended as a new gzip-compressed JSONL object (`*.jsonl.gz`). Older plain `.jsonl` files remain readable.
+  - `is_bot`: ua-parser device family is `Spider`.
+  - `agent`: match of a regex for common bot/client names (`bot`, `crawler`, `curl`, `python`, ...).
+  - `robots_token`: longest `robots_agents` token contained in the UA.
+- Step 2: the hour partitions of both summaries are deleted, then re-written with Athena `UNLOAD`. Re-runs are idempotent.
+- Reserved concurrency is 1 (`ua_dim` is append-only).
+- The Lambda stops the running Athena query and fails when less than 20 s remain.
+
+| Event | Effect |
+|-------|--------|
+| `{}` | previous hour |
+| `{"dt":"YYYY-MM-DD","hour":H}` | one hour |
+| `{"dt":"YYYY-MM-DD"}` | whole day, use for backfill |
+| `{"reparse": true}` | re-classify all `ua_dim` rows after a ua-parser or robots change; `parser_version` shows which version classified a row |
+
+The function is named `cf-logs-summarizer-<distribution-id>`, or `cf-logs-summarizer-multiple-ids` when several ids are configured.
+
+Backfill one day:
+
+```
+aws lambda invoke --function-name cf-logs-summarizer-<distribution-id> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"dt":"2025-01-31"}' /dev/stdout
+```
+
+### Tables
+
+`robots_agents` (JSON): one row per robots.txt token.
+
+| Column | Meaning |
+|--------|---------|
+| token | agent token, e.g. `GPTBot` |
+| operator | company behind the agent |
+| purpose | `search`, `ai-training`, `ai-search`, `ai-user`, `ads` or `other` |
+| notes | free text |
+
+`ua_dim` (gzip JSONL): one row per raw `cs_user_agent`.
+
+| Column | Meaning |
+|--------|---------|
+| cs_user_agent | raw value as logged (key) |
+| ua | URL-decoded value |
+| family, os, device | ua-parser output |
+| is_bot | device family is `Spider` |
+| agent | regex match, empty if none |
+| robots_token | longest matching token, empty if none |
+| parser_version | ua-parser version + hash of the tokens |
+| first_seen | `YYYY-MM-DD HH` of first sighting |
+
+`cf_ua_hourly` (Parquet, partitions `dt`, `hour`): grain = distribution, host, user agent, status class, edge result type, hour.
+
+| Column | Meaning |
+|--------|---------|
+| distributionid, host, cs_user_agent | dimensions |
+| status_class | `2xx`, `4xx`, ... |
+| edge_result_type | `x_edge_result_type` |
+| requests, bytes, time_taken_sum | count, sum of `sc_bytes`, sum of `time_taken` |
+
+`cf_bot_errors_hourly` (Parquet, partitions `dt`, `hour`): 4xx/5xx of bot user agents (`is_bot` or `agent` set); grain = distribution, host, path, user agent, status, hour.
+
+| Column | Meaning |
+|--------|---------|
+| distributionid, host, path, cs_user_agent, sc_status | dimensions |
+| requests | count |
+
+### Results bucket layout
+
+| Prefix | Content |
+|--------|---------|
+| `athena-results/` | Athena query results (default `output_prefix`); expire after `results_expiration_days` only when the module creates the bucket (`s3_results_bucket.create = true`) |
+| `supporters/robots-agents/` | `robots_agents.json`, written by Terraform |
+| `ua_dim/` | classified user agents, gzip JSONL (`*.jsonl.gz`) |
+| `summaries/cf_ua_hourly/`, `summaries/cf_bot_errors_hourly/` | `dt=YYYY-MM-DD/hour=HH/` Parquet |
+
+### Lambda layer
+
+Dependencies (`summarizer/requirements.txt`) are built by the `summarizer-layer` workflow when that file changes and committed as `summarizer/layer.zip`. The layer is prebuilt in CI and committed; Terraform only zips `handler.py` (`archive_file`) at plan time.
+
+### Known limits
+
+- `reparse` holds all `ua_dim` rows in memory (1024 MB Lambda).
+- `robots_agents_url` is fetched at plan time: a non-200 response ignores the URL tokens, an unreachable host fails the plan.
+- Only the previous hour is processed automatically; log delivery lag was measured at 7 min or less.
+
+## Workgroup guardrails
+
+`athena_workgroup.create = true` creates a workgroup with:
+
+- `bytes_scanned_cutoff_per_query`: default 100 GB (~2.5x the largest observed dashboard query, 38 GB); larger queries are cancelled.
+- Enforced workgroup configuration (clients cannot override output location or limits).
+- CloudWatch metrics enabled.
+- Results written to the results bucket with SSE-S3; `athena-results/` (default output prefix) expires after `s3_results_bucket.results_expiration_days` (default 30); this rule exists only when the module creates the results bucket (`s3_results_bucket.create = true`).
 
 ## Contributing
 

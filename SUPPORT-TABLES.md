@@ -61,3 +61,23 @@ source       STRING     -- Source of the lookup (e.g., ipinfo)
 **Format:** Parquet
 
 **Sample Data:** See [scripts/sample-ip-geolocation.jsonl](scripts/sample-ip-geolocation.jsonl) (convert to Parquet before uploading)
+
+---
+
+## Table: robots_agents
+
+**Purpose:** Robots.txt agent tokens used by the UA summarizer to set `robots_token` in `ua_dim` (gzip-compressed JSONL, `*.jsonl.gz`; older plain `.jsonl` files remain readable). Only created with `summaries.enable = true`.
+
+**Schema:**
+```sql
+token     STRING   -- Agent token, e.g. GPTBot
+operator  STRING   -- Company behind the agent
+purpose   STRING   -- search, ai-training, ai-search, ai-user, ads or other
+notes     STRING   -- Free text
+```
+
+**Location:** `s3://<results-bucket>/supporters/robots-agents/robots_agents.json`
+
+**Format:** JSON lines
+
+**Maintenance:** Written by Terraform, do not edit in S3. Source is `summaries.robots_agents` (default list of known bots) plus, if set, the `User-agent` tokens of `summaries.robots_agents_url` fetched at plan time (`*` is skipped, explicit entries win). See [README](README.md#ua-summaries).
