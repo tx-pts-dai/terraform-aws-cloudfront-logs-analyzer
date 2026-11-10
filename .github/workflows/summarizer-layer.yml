@@ -3,7 +3,7 @@ name: summarizer-layer
 on:
   pull_request:
     paths:
-      - summarizer/requirements.txt
+      - summarizer/**
       - .github/workflows/summarizer-layer.yml
   workflow_dispatch:
 
@@ -26,9 +26,16 @@ jobs:
         run: |
           pip install -r summarizer/requirements.txt \
             --platform manylinux2014_x86_64 --python-version 3.12 --only-binary=:all: \
-            -t build/python
-          cd build && zip -qrX layer.zip python
-          mv -f layer.zip ../summarizer/layer.zip
+            -t build/python --no-compile
+          find build/python -exec touch -h -t 202001010000 {} +
+          find build -name __pycache__ -type d -prune -exec rm -r {} +
+          (cd build && find python -print | LC_ALL=C sort | zip -qX -@ layer.zip)
+          mv -f build/layer.zip summarizer/layer.zip
+
+      - name: Test
+        run: |
+          pip install -r summarizer/requirements.txt
+          cd summarizer && AWS_DEFAULT_REGION=eu-central-1 python test_handler.py
 
       - name: Commit layer
         run: |

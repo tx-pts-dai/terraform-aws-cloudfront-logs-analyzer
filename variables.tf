@@ -37,6 +37,11 @@ variable "s3_results_bucket" {
     results_expiration_days = optional(number, 30)
     lifecycle_rules         = optional(list(any), [])
   })
+
+  validation {
+    condition     = var.s3_results_bucket.output_prefix != ""
+    error_message = "output_prefix must not be empty: an empty prefix would make the athena-results expiration rule cover the whole bucket"
+  }
 }
 
 # Glue Database
@@ -113,12 +118,15 @@ variable "athena_custom_named_queries" {
 
 # Summaries
 variable "summaries" {
-  description = "Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them"
+  description = "Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm_actions: SNS topic ARNs notified when the summarizer fails or stops running. min_daily_requests: a user agent is classified once it has at least this many requests in a UTC day. The not-running alarm assumes the default hourly schedule."
   type = object({
     enable   = bool
     schedule = optional(string, "cron(20 * * * ? *)")
 
-    robots_agents_url = optional(string)
+    alarm_actions      = optional(list(string), [])
+    min_daily_requests = optional(number, 100)
+
+    robots_agents_url = optional(string, "")
     robots_agents = optional(list(object({
       token    = string
       operator = string
@@ -145,6 +153,11 @@ variable "summaries" {
   })
   default = {
     enable = false
+  }
+
+  validation {
+    condition     = var.summaries.min_daily_requests >= 1 && floor(var.summaries.min_daily_requests) == var.summaries.min_daily_requests
+    error_message = "min_daily_requests must be an integer >= 1"
   }
 
   validation {

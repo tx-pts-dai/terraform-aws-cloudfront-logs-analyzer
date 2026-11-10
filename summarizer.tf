@@ -1,37 +1,11 @@
 locals {
-  summarizer_name = "cf-logs-summarizer-${local.distribution_ids_name}"
-  summarizer_src  = "${path.module}/summarizer"
-  robots_key      = "supporters/robots-agents/robots_agents.json"
-  results_arn     = "arn:aws:s3:::${local.s3_results_bucket_name}"
-  glue_arn_prefix = "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
+  summarizer_name     = "cf-logs-summarizer-${local.distribution_ids_name}"
+  summarizer_src      = "${path.module}/summarizer"
+  robots_key          = "supporters/robots-agents/robots_agents.json"
+  robots_from_url_key = "supporters/robots-agents/from_url.json"
+  results_arn         = "arn:aws:s3:::${local.s3_results_bucket_name}"
+  glue_arn_prefix     = "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
 
-  robots_url_enabled = var.summaries.enable && var.summaries.robots_agents_url != null
-
-  robots_url_tokens = try(data.http.robots_txt[0].status_code, 0) == 200 ? distinct([
-    for m in regexall("(?im)^user-agent:(.*)$", try(data.http.robots_txt[0].response_body, "")) : trimspace(m[0])
-    if trimspace(m[0]) != "*"
-  ]) : []
-
-  robots_explicit_lower = [for a in var.summaries.robots_agents : lower(a.token)]
-
-  robots_agents = concat(
-    var.summaries.robots_agents,
-    [
-      for t in local.robots_url_tokens :
-      { token = t, operator = "", purpose = "other", notes = "from robots_agents_url" }
-      if !contains(local.robots_explicit_lower, lower(t))
-    ],
-  )
-}
-
-data "http" "robots_txt" {
-  count = local.robots_url_enabled ? 1 : 0
-
-  url = var.summaries.robots_agents_url
-
-  retry {
-    attempts = 2
-  }
 }
 
 resource "aws_s3_object" "robots_agents" {
@@ -40,7 +14,7 @@ resource "aws_s3_object" "robots_agents" {
   bucket       = local.s3_results_bucket_name
   key          = local.robots_key
   content_type = "application/x-ndjson"
-  content      = join("\n", [for a in local.robots_agents : jsonencode(a)])
+  content      = join("\n", [for a in var.summaries.robots_agents : jsonencode(a)])
 
   depends_on = [module.s3_bucket_results]
 }
@@ -96,11 +70,13 @@ resource "aws_lambda_function" "summarizer" {
 
   environment {
     variables = {
-      DATABASE        = aws_glue_catalog_database.cloudfront_logs.name
-      WORKGROUP       = local.athena_workgroup_name
-      OUTPUT_LOCATION = "s3://${local.s3_results_bucket_name}/${local.s3_results_bucket_prefix}summarizer/"
-      RESULTS_BUCKET  = local.s3_results_bucket_name
-      ROBOTS_KEY      = local.robots_key
+      DATABASE           = aws_glue_catalog_database.cloudfront_logs.name
+      WORKGROUP          = local.athena_workgroup_name
+      OUTPUT_LOCATION    = "s3://${local.s3_results_bucket_name}/${local.s3_results_bucket_prefix}summarizer/"
+      RESULTS_BUCKET     = local.s3_results_bucket_name
+      ROBOTS_KEY         = local.robots_key
+      ROBOTS_URL         = var.summaries.robots_agents_url
+      MIN_DAILY_REQUESTS = tostring(var.summaries.min_daily_requests)
     }
   }
 

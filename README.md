@@ -165,7 +165,6 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | terraform | >= 1.10 |
 | archive | >= 2.0 |
 | aws | >= 6.0 |
-| http | >= 3.0 |
 
 ### Providers
 
@@ -173,7 +172,6 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 |------|---------|
 | archive | >= 2.0 |
 | aws | >= 6.0 |
-| http | >= 3.0 |
 
 ### Modules
 
@@ -189,6 +187,8 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_athena_named_query.detect_outliers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_workgroup.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_workgroup) | resource |
 | [aws_cloudwatch_log_group.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
+| [aws_cloudwatch_metric_alarm.summarizer_errors](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
+| [aws_cloudwatch_metric_alarm.summarizer_not_running](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_glue_catalog_database.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_database) | resource |
 | [aws_glue_catalog_table.cf_bot_errors_hourly](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.cf_ua_hourly](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
@@ -216,7 +216,6 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_iam_policy_document.summarizer_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.summarizer_scheduler_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
-| [http_http.robots_txt](https://registry.terraform.io/providers/hashicorp/http/latest/docs/data-sources/http) | data source |
 
 ### Inputs
 
@@ -231,7 +230,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | s3\_parquet\_bucket | Configuration for the existing S3 bucket where CloudFront logs in Parquet format are stored | ```object({ name = string logs_prefix = string })``` | n/a | yes |
 | s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) results_expiration_days = optional(number, 30) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
 | s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_whitelist_format = optional(string, "parquet") ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
-| summaries | Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them | ```object({ enable = bool schedule = optional(string, "cron(20 * * * ? *)") robots_agents_url = optional(string) robots_agents = optional(list(object({ token = string operator = string purpose = string notes = optional(string, "") })), [ { token = "GPTBot", operator = "OpenAI", purpose = "ai-training" }, { token = "ClaudeBot", operator = "Anthropic", purpose = "ai-training" }, { token = "Google-Extended", operator = "Google", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Applebot-Extended", operator = "Apple", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Meta-ExternalAgent", operator = "Meta", purpose = "ai-training" }, { token = "Googlebot", operator = "Google", purpose = "search" }, { token = "Bingbot", operator = "Microsoft", purpose = "search" }, { token = "Applebot", operator = "Apple", purpose = "search" }, { token = "OAI-SearchBot", operator = "OpenAI", purpose = "ai-search" }, { token = "PerplexityBot", operator = "Perplexity", purpose = "ai-search" }, { token = "Claude-SearchBot", operator = "Anthropic", purpose = "ai-search" }, { token = "Meta-WebIndexer", operator = "Meta", purpose = "ai-search" }, { token = "ChatGPT-User", operator = "OpenAI", purpose = "ai-user" }, { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" }, { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" }, { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" }, ]) })``` | ```{ "enable": false }``` | no |
+| summaries | Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm\_actions: SNS topic ARNs notified when the summarizer fails or stops running. min\_daily\_requests: a user agent is classified once it has at least this many requests in a UTC day. The not-running alarm assumes the default hourly schedule. | ```object({ enable = bool schedule = optional(string, "cron(20 * * * ? *)") alarm_actions = optional(list(string), []) min_daily_requests = optional(number, 100) robots_agents_url = optional(string, "") robots_agents = optional(list(object({ token = string operator = string purpose = string notes = optional(string, "") })), [ { token = "GPTBot", operator = "OpenAI", purpose = "ai-training" }, { token = "ClaudeBot", operator = "Anthropic", purpose = "ai-training" }, { token = "Google-Extended", operator = "Google", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Applebot-Extended", operator = "Apple", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Meta-ExternalAgent", operator = "Meta", purpose = "ai-training" }, { token = "Googlebot", operator = "Google", purpose = "search" }, { token = "Bingbot", operator = "Microsoft", purpose = "search" }, { token = "Applebot", operator = "Apple", purpose = "search" }, { token = "OAI-SearchBot", operator = "OpenAI", purpose = "ai-search" }, { token = "PerplexityBot", operator = "Perplexity", purpose = "ai-search" }, { token = "Claude-SearchBot", operator = "Anthropic", purpose = "ai-search" }, { token = "Meta-WebIndexer", operator = "Meta", purpose = "ai-search" }, { token = "ChatGPT-User", operator = "OpenAI", purpose = "ai-user" }, { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" }, { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" }, { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" }, ]) })``` | ```{ "enable": false }``` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 
 ### Outputs
@@ -243,6 +242,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | glue\_table\_cloudfront\_logs | Name of the CloudFront logs table |
 | grafana\_role\_arn | ARN of the IAM role for Grafana access |
 | s3\_results\_bucket | S3 bucket for analysis results |
+| summaries\_alarm\_arns | ARNs of the summarizer CloudWatch alarms (empty when summaries are disabled) |
 | summaries\_glue\_tables | Glue tables created for summaries (null when disabled) |
 | summaries\_lambda\_name | Name of the summarizer Lambda (null when summaries are disabled) |
 <!-- END_TF_DOCS -->

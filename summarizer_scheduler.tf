@@ -12,6 +12,6 @@ resource "aws_scheduler_schedule" "summarizer" {
   target {
     arn      = aws_lambda_function.summarizer[0].arn
     role_arn = aws_iam_role.summarizer_scheduler[0].arn
-    input    = "{}"
+    input    = jsonencode({ scheduled_time = "<aws.scheduler.scheduled-time>" })
   }
 }

@@ -26,7 +26,7 @@ output "athena_named_queries" {
 
 output "grafana_role_arn" {
   description = "ARN of the IAM role for Grafana access"
-  value       = aws_iam_role.grafana[0].arn
+  value       = one(aws_iam_role.grafana[*].arn)
 }
 
 # Summaries
@@ -43,4 +43,9 @@ output "summaries_glue_tables" {
     cf_ua_hourly         = aws_glue_catalog_table.cf_ua_hourly[0].name
     cf_bot_errors_hourly = aws_glue_catalog_table.cf_bot_errors_hourly[0].name
   } : null
+}
+
+output "summaries_alarm_arns" {
+  description = "ARNs of the summarizer CloudWatch alarms (empty when summaries are disabled)"
+  value       = concat(aws_cloudwatch_metric_alarm.summarizer_errors[*].arn, aws_cloudwatch_metric_alarm.summarizer_not_running[*].arn)
 }

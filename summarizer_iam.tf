@@ -73,6 +73,12 @@ data "aws_iam_policy_document" "summarizer" {
     actions   = ["s3:GetObject"]
     resources = ["${local.results_arn}/supporters/robots-agents/*"]
   }
+
+  statement {
+    sid       = "WriteRobotsFromUrl"
+    actions   = ["s3:PutObject"]
+    resources = ["${local.results_arn}/${local.robots_from_url_key}"]
+  }
 }
 
 resource "aws_iam_role" "summarizer" {
