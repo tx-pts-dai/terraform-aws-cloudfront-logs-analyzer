@@ -163,19 +163,23 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | Name | Version |
 |------|---------|
 | terraform | >= 1.10 |
+| archive | >= 2.0 |
 | aws | >= 6.0 |
+| http | >= 3.0 |
 
 ### Providers
 
 | Name | Version |
 |------|---------|
-| aws | 6.33.0 |
+| archive | >= 2.0 |
+| aws | >= 6.0 |
+| http | >= 3.0 |
 
 ### Modules
 
 | Name | Source | Version |
 |------|--------|---------|
-| s3\_bucket\_results | terraform-aws-modules/s3-bucket/aws | 5.10.0 |
+| s3\_bucket\_results | terraform-aws-modules/s3-bucket/aws | 5.17.0 |
 
 ### Resources
 
@@ -184,26 +188,50 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_athena_named_query.custom_named_queries](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_named_query.detect_outliers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_workgroup.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_workgroup) | resource |
+| [aws_cloudwatch_log_group.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_glue_catalog_database.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_database) | resource |
+| [aws_glue_catalog_table.cf_bot_errors_hourly](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
+| [aws_glue_catalog_table.cf_ua_hourly](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.cloudfront_logs_parquet](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_geolocation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_whitelist](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
-| [aws_iam_policy.grafana_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
+| [aws_glue_catalog_table.robots_agents](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
+| [aws_glue_catalog_table.ua_dim](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
+| [aws_iam_policy.grafana_athena_query_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.grafana](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.summarizer_scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.summarizer_scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy_attachment.attach_grafana_athena_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_lambda_function.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_layer_version.summarizer_deps](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_layer_version) | resource |
+| [aws_s3_object.robots_agents](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_object) | resource |
+| [aws_scheduler_schedule.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) | resource |
+| [archive_file.summarizer](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.grafana_athena_assume_role_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.grafana_athena_query_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.summarizer_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.summarizer_scheduler_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
+| [http_http.robots_txt](https://registry.terraform.io/providers/hashicorp/http/latest/docs/data-sources/http) | data source |
 
 ### Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | athena\_custom\_named\_queries | List of custom Athena named queries to create | ```list(object({ name = string description = optional(string) path_to_sql_file = string }))``` | `[]` | no |
-| athena\_workgroup | Configuration for the Athena workgroup | ```object({ create = bool name = optional(string) })``` | ```{ "create": false, "name": "primary" }``` | no |
+| athena\_workgroup | Configuration for the Athena workgroup | ```object({ create = bool name = optional(string) # ~2.5x the largest query observed on the Grafana dashboards (38 GB) bytes_scanned_cutoff_per_query = optional(number, 107374182400) })``` | ```{ "create": false, "name": "primary" }``` | no |
 | cloudfront\_distribution | The IDs of the CloudFront distributions to analyze logs for. | ```object({ name = optional(string, "global") ids = list(string) })``` | n/a | yes |
 | environment | Environment name (e.g., dev, staging, prod) | `string` | `"prod"` | no |
 | glue\_database | Name of the Glue database for CloudFront logs | ```object({ name = optional(string) })``` | `{}` | no |
-| grafana\_access | Configuration for Grafana integration | ```object({ create = bool name = optional(string) custom_policy_arn = optional(string) })``` | ```{ "create": false }``` | no |
+| grafana\_access | Configuration for Grafana integration | ```object({ create = bool name = optional(string, "cloudfront-logs-grafana-access") trusted_role_arns = optional(list(string), []) custom_policy_arn = optional(string) })``` | ```{ "create": false }``` | no |
 | s3\_parquet\_bucket | Configuration for the existing S3 bucket where CloudFront logs in Parquet format are stored | ```object({ name = string logs_prefix = string })``` | n/a | yes |
-| s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
-| s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
+| s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) results_expiration_days = optional(number, 30) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
+| s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_whitelist_format = optional(string, "parquet") ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
+| summaries | Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them | ```object({ enable = bool schedule = optional(string, "cron(20 * * * ? *)") robots_agents_url = optional(string) robots_agents = optional(list(object({ token = string operator = string purpose = string notes = optional(string, "") })), [ { token = "GPTBot", operator = "OpenAI", purpose = "ai-training" }, { token = "ClaudeBot", operator = "Anthropic", purpose = "ai-training" }, { token = "Google-Extended", operator = "Google", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Applebot-Extended", operator = "Apple", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Meta-ExternalAgent", operator = "Meta", purpose = "ai-training" }, { token = "Googlebot", operator = "Google", purpose = "search" }, { token = "Bingbot", operator = "Microsoft", purpose = "search" }, { token = "Applebot", operator = "Apple", purpose = "search" }, { token = "OAI-SearchBot", operator = "OpenAI", purpose = "ai-search" }, { token = "PerplexityBot", operator = "Perplexity", purpose = "ai-search" }, { token = "Claude-SearchBot", operator = "Anthropic", purpose = "ai-search" }, { token = "Meta-WebIndexer", operator = "Meta", purpose = "ai-search" }, { token = "ChatGPT-User", operator = "OpenAI", purpose = "ai-user" }, { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" }, { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" }, { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" }, ]) })``` | ```{ "enable": false }``` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 
 ### Outputs
@@ -213,5 +241,8 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | athena\_named\_queries | Athena named queries |
 | glue\_database\_name | Name of the Glue database |
 | glue\_table\_cloudfront\_logs | Name of the CloudFront logs table |
+| grafana\_role\_arn | ARN of the IAM role for Grafana access |
 | s3\_results\_bucket | S3 bucket for analysis results |
+| summaries\_glue\_tables | Glue tables created for summaries (null when disabled) |
+| summaries\_lambda\_name | Name of the summarizer Lambda (null when summaries are disabled) |
 <!-- END_TF_DOCS -->
