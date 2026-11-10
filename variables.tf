@@ -126,7 +126,7 @@ variable "summaries" {
   description = "Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm_actions: SNS topic ARNs notified when the summarizer fails or stops running. The not-running alarm assumes the default hourly schedule."
   type = object({
     enable   = bool
-    schedule = optional(string, "cron(20 * * * ? *)")
+    schedule = optional(string, "cron(30 * * * ? *)")
 
     alarm_actions = optional(list(string), [])
 
