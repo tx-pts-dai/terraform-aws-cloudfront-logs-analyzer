@@ -39,7 +39,7 @@ output "summaries_glue_tables" {
   description = "Glue tables created for summaries (null when disabled)"
   value = var.summaries.enable ? {
     robots_agents        = aws_glue_catalog_table.robots_agents[0].name
-    ua_dim               = aws_glue_catalog_table.ua_dim[0].name
+    ua_map               = aws_glue_catalog_table.ua_map[0].name
     cf_ua_hourly         = aws_glue_catalog_table.cf_ua_hourly[0].name
     cf_bot_errors_hourly = aws_glue_catalog_table.cf_bot_errors_hourly[0].name
   } : null

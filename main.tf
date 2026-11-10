@@ -54,6 +54,12 @@ module "s3_bucket_results" {
     enabled    = true
     filter     = { prefix = local.s3_results_bucket_prefix }
     expiration = { days = var.s3_results_bucket.results_expiration_days }
+    },
+    {
+      id         = "ua-map"
+      enabled    = true
+      filter     = { prefix = "ua_map/" }
+      expiration = { days = 90 }
   }], var.s3_results_bucket.lifecycle_rules)
 
   server_side_encryption_configuration = {
@@ -187,7 +193,7 @@ data "aws_iam_policy_document" "grafana_athena_query_policy" {
       [for t in aws_glue_catalog_table.ip_whitelist : t.arn],
       [for t in aws_glue_catalog_table.ip_geolocation : t.arn],
       [for t in aws_glue_catalog_table.robots_agents : t.arn],
-      [for t in aws_glue_catalog_table.ua_dim : t.arn],
+      [for t in aws_glue_catalog_table.ua_map : t.arn],
       [for t in aws_glue_catalog_table.cf_ua_hourly : t.arn],
       [for t in aws_glue_catalog_table.cf_bot_errors_hourly : t.arn],
     )

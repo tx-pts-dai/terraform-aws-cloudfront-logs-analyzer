@@ -66,7 +66,7 @@ source       STRING     -- Source of the lookup (e.g., ipinfo)
 
 ## Table: robots_agents
 
-**Purpose:** Robots.txt agent tokens used by the UA summarizer to set `robots_token` in `ua_dim` (gzip-compressed JSONL, `*.jsonl.gz`; older plain `.jsonl` files remain readable). Only created with `summaries.enable = true`.
+**Purpose:** Explicit robots.txt agent tokens used by the UA summarizer to set `robots_token` in `ua_map`. Only created with `summaries.enable = true`.
 
 **Schema:**
 ```sql
@@ -80,4 +80,4 @@ notes     STRING   -- Free text
 
 **Format:** JSON lines
 
-**Maintenance:** Written by Terraform, do not edit in S3. Source is `summaries.robots_agents` (default list of known bots) plus, if set, the `User-agent` tokens of `summaries.robots_agents_url` fetched at plan time (`*` is skipped, explicit entries win). See [README](README.md#ua-summaries).
+**Maintenance:** Written by Terraform, do not edit in S3. Source is `summaries.robots_agents` (default list of known bots). If `summaries.robots_agents_url` is set, the Lambda fetches it every run and merges its `User-agent` tokens case-insensitively (explicit wins; `*` and comments ignored). On fetch failure only the explicit tokens are used. URL tokens are not written to the table. See [README](README.md#ua-summaries).

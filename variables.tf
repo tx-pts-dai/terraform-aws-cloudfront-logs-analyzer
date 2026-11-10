@@ -118,13 +118,12 @@ variable "athena_custom_named_queries" {
 
 # Summaries
 variable "summaries" {
-  description = "Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm_actions: SNS topic ARNs notified when the summarizer fails or stops running. min_daily_requests: a user agent is classified once it has at least this many requests in a UTC day. The not-running alarm assumes the default hourly schedule."
+  description = "Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm_actions: SNS topic ARNs notified when the summarizer fails or stops running. The not-running alarm assumes the default hourly schedule."
   type = object({
     enable   = bool
     schedule = optional(string, "cron(20 * * * ? *)")
 
-    alarm_actions      = optional(list(string), [])
-    min_daily_requests = optional(number, 100)
+    alarm_actions = optional(list(string), [])
 
     robots_agents_url = optional(string, "")
     robots_agents = optional(list(object({
@@ -153,11 +152,6 @@ variable "summaries" {
   })
   default = {
     enable = false
-  }
-
-  validation {
-    condition     = var.summaries.min_daily_requests >= 1 && floor(var.summaries.min_daily_requests) == var.summaries.min_daily_requests
-    error_message = "min_daily_requests must be an integer >= 1"
   }
 
   validation {

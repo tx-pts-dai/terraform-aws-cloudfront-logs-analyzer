@@ -62,20 +62,19 @@ resource "aws_lambda_function" "summarizer" {
   timeout          = 900
   memory_size      = 1024
 
-  # ua_dim is append-only; concurrent runs would write duplicate rows
+  # concurrent runs would race on the ua_map and summary partitions
   reserved_concurrent_executions = 1
 
   layers = [aws_lambda_layer_version.summarizer_deps[0].arn]
 
   environment {
     variables = {
-      DATABASE           = aws_glue_catalog_database.cloudfront_logs.name
-      WORKGROUP          = local.athena_workgroup_name
-      OUTPUT_LOCATION    = "s3://${local.s3_results_bucket_name}/${local.s3_results_bucket_prefix}summarizer/"
-      RESULTS_BUCKET     = local.s3_results_bucket_name
-      ROBOTS_KEY         = local.robots_key
-      ROBOTS_URL         = var.summaries.robots_agents_url
-      MIN_DAILY_REQUESTS = tostring(var.summaries.min_daily_requests)
+      DATABASE        = aws_glue_catalog_database.cloudfront_logs.name
+      WORKGROUP       = local.athena_workgroup_name
+      OUTPUT_LOCATION = "s3://${local.s3_results_bucket_name}/${local.s3_results_bucket_prefix}summarizer/"
+      RESULTS_BUCKET  = local.s3_results_bucket_name
+      ROBOTS_KEY      = local.robots_key
+      ROBOTS_URL      = var.summaries.robots_agents_url
     }
   }
 
