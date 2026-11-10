@@ -161,7 +161,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 ### Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | terraform | >= 1.10 |
 | archive | >= 2.0 |
 | aws | >= 6.0 |
@@ -170,7 +170,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 ### Providers
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | archive | >= 2.0 |
 | aws | >= 6.0 |
 | http | >= 3.0 |
@@ -178,13 +178,13 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 ### Modules
 
 | Name | Source | Version |
-| ---- | ------ | ------- |
+|------|--------|---------|
 | s3\_bucket\_results | terraform-aws-modules/s3-bucket/aws | 5.17.0 |
 
 ### Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [aws_athena_named_query.custom_named_queries](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_named_query.detect_outliers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_workgroup.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_workgroup) | resource |
@@ -221,7 +221,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 ### Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | athena\_custom\_named\_queries | List of custom Athena named queries to create | ```list(object({ name = string description = optional(string) path_to_sql_file = string }))``` | `[]` | no |
 | athena\_workgroup | Configuration for the Athena workgroup | ```object({ create = bool name = optional(string) # ~2.5x the largest query observed on the Grafana dashboards (38 GB) bytes_scanned_cutoff_per_query = optional(number, 107374182400) })``` | ```{ "create": false, "name": "primary" }``` | no |
 | cloudfront\_distribution | The IDs of the CloudFront distributions to analyze logs for. | ```object({ name = optional(string, "global") ids = list(string) })``` | n/a | yes |
@@ -237,7 +237,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 ### Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | athena\_named\_queries | Athena named queries |
 | glue\_database\_name | Name of the Glue database |
 | glue\_table\_cloudfront\_logs | Name of the CloudFront logs table |
