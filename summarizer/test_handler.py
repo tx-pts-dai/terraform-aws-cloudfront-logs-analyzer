@@ -1,4 +1,5 @@
 import sys
+import time
 from datetime import datetime, timezone
 from unittest import mock
 
@@ -36,7 +37,25 @@ assert r["agent"] == "python-requests" and r["robots_token"] == "", r
 
 for empty in ("", "-"):
     r = c(empty)
-    assert r["ua_class"] == "human" and r["agent"] == "" and r["robots_token"] == "", r
+    assert r["ua_class"] == "suspected_bot" and r["agent"] == "" and r["robots_token"] == "", r
+
+t0 = time.perf_counter()
+r = c("a" * 8192)
+assert time.perf_counter() - t0 < 0.05 and r["ua_class"] == "human", r
+t0 = time.perf_counter()
+assert handler.find_agent("a" * 1_000_000 + " googlebot")[0] == "googlebot"
+assert time.perf_counter() - t0 < 0.5
+r = c("okhttp/4.9 MyCrawler/1.0")
+assert r["ua_class"] == "bot" and r["agent"] == "mycrawler", r
+r = c("Mozilla/5.0%20(Linux;%20Android%209;%20CUBOT_X19)%20AppleWebKit/537.36%20(KHTML,%20like%20Gecko)%20Chrome/99.0.4844.88%20Mobile%20Safari/537.36")
+assert r["ua_class"] == "human" and r["agent"] == "", r
+r = c("Mozilla/5.0%20(Windows%20NT%2010.0)%20AppleWebKit/537.36%20(KHTML,%20like%20Gecko)%20Chrome/100.0.4896.127%20Safari/537.36%20javascript")
+assert r["ua_class"] == "human" and r["agent"] == "", r
+assert c("Java/1.8.0_292")["ua_class"] == "bot"
+r = c("okhttp/4.9.3")
+assert r["ua_class"] == "suspected_bot" and r["agent"] == "okhttp", r
+assert c("Googlebot/2.1")["agent"] == "googlebot"
+assert handler.filter_url_tokens(["GPTBot", "Mozilla", "Gecko", "abc", "Sogou web spider", "Yandex"]) == ["GPTBot", "Sogou web spider"]
 
 now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
 assert handler.parse_event({}, now) == ("2025-12-31", 23, 23)
@@ -95,4 +114,69 @@ try:
     raise AssertionError("empty range accepted")
 except RuntimeError:
     assert not calls, calls
+
+store = {"summaries/cf_ua_hourly/dt=2026-03-05/hour=01/old.parquet", "summaries/cf_bot_errors_hourly/dt=2026-03-05/hour=01/old.parquet"}
+handler.list_keys = lambda p: sorted(k for k in store if k.startswith(p))
+handler.delete_keys = lambda ks: store.difference_update(ks)
+
+
+def unload_ok(sql: str, params: list, deadline: float | None = None) -> str:
+    table = "cf_ua_hourly" if "summaries/cf_ua_hourly/" in sql else "cf_bot_errors_hourly"
+    store.add(f"summaries/{table}/dt=2026-03-05/hour=01/new.parquet")
+    return "q"
+
+
+handler.run_query = unload_ok
+handler.rebuild_summaries("2026-03-05", 1, 1)
+assert store == {
+    "summaries/cf_ua_hourly/dt=2026-03-05/hour=01/new.parquet",
+    "summaries/cf_bot_errors_hourly/dt=2026-03-05/hour=01/new.parquet",
+}, store
+
+store.clear()
+store.update({"summaries/cf_ua_hourly/dt=2026-03-05/hour=01/old.parquet", "summaries/cf_bot_errors_hourly/dt=2026-03-05/hour=01/old.parquet"})
+before = set(store)
+
+
+def unload_fail(sql: str, params: list, deadline: float | None = None) -> str:
+    store.add("summaries/cf_ua_hourly/dt=2026-03-05/hour=01/partial.parquet")
+    raise RuntimeError("unload failed")
+
+
+handler.run_query = unload_fail
+try:
+    handler.rebuild_summaries("2026-03-05", 1, 1)
+    raise AssertionError("failed UNLOAD swallowed")
+except RuntimeError:
+    assert store == before, store
 print("ok")
+
+
+class FakeResp:
+    def __init__(self, data: bytes = b"", url: str = "https://x.test/robots.txt") -> None:
+        self.data, self.url, self.calls = data, url, 0
+
+    def read1(self, n: int) -> bytes:
+        self.calls += 1
+        chunk, self.data = self.data[:n], self.data[n:]
+        return chunk
+
+    def __enter__(self) -> "FakeResp":
+        return self
+
+    def __exit__(self, *a: object) -> None:
+        return None
+
+
+big = FakeResp(b"x" * (handler.ROBOTS_MAX_BYTES + 5000))
+assert len(handler.read_capped(big)) == handler.ROBOTS_MAX_BYTES and big.calls == 16
+
+with mock.patch.object(handler, "ROBOTS_URL", "http://x.test/robots.txt"), mock.patch.object(handler.urllib.request, "urlopen") as uo:
+    assert handler.url_tokens() == []
+    uo.assert_not_called()
+
+with mock.patch.object(handler, "ROBOTS_URL", "https://x.test/robots.txt"):
+    with mock.patch.object(handler.urllib.request, "urlopen", return_value=FakeResp(b"User-agent: GPTBot\n")):
+        assert handler.url_tokens() == ["GPTBot"]
+    with mock.patch.object(handler.urllib.request, "urlopen", return_value=FakeResp(b"User-agent: GPTBot\n", "http://x.test/robots.txt")):
+        assert handler.url_tokens() == []

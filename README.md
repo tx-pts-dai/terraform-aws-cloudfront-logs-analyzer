@@ -199,18 +199,20 @@ flowchart LR
 
 - Per hour (default: previous UTC hour, `scheduled_time` from the scheduler; schedule `cron(20 * * * ? *)`, `summaries.schedule`):
   - Athena lists the distinct user agents; the Lambda classifies each (family, os, device, agent, robots_token, ua_class, parser_version) and writes the `ua_map` hour.
-  - The hour partitions of both summaries are deleted, then re-written with Athena `UNLOAD` joining the raw logs to `ua_map`. Re-runs are idempotent.
-- No user agents for the hour: the run fails (alarm + async retry); existing partitions stay untouched.
+  - The hour partitions of both summaries are re-written with Athena `UNLOAD` joining the raw logs to `ua_map`; the previous files are deleted only after the `UNLOAD` succeeded (on failure the new files are removed and the old ones stay). Re-runs are idempotent.
+- No user agents for the hour: the run fails (async retry, then the failed-events queue); existing partitions stay untouched.
+- Failed events: the Lambda retries an async failure twice (max event age 6 h), then sends the event to the SQS queue `cf-logs-summarizer-<id>-failed` (output `summaries_failed_queue_url`, 14-day retention). The `-failed-events` alarm fires while the queue holds a message; the message carries `dt`/`hour`/`scheduled_time` of the lost hour. Re-run the hour, then purge the queue.
 - Rows missing from the map (late-arriving log files) get `ua_class = 'unmapped'`.
 - Reserved concurrency is 1. The Lambda stops the running Athena query and fails when less than 20 s remain.
+- Tokens from `summaries.robots_agents_url` must be `https` (a redirect to a non-`https` URL is rejected); the read is capped at 1 MB and 10 s, tokens shorter than 4 characters and generic ones (`mozilla`, `chrome`, `safari`, `android`, ...) are dropped. Explicit `robots_agents` are never filtered. The token count is logged per run.
 - `parser_version`: ua-parser release + hash of the tokens + rules version (`rules-N`, bumped when the `ua_class` rules change).
 
 `ua_class`, first match wins:
 
 | Value | Condition |
 |-------|-----------|
-| `bot` | ua-parser device family `Spider`, or `agent` regex match, or `robots_token` match |
-| `suspected_bot` | not a bot, and a full-version Chrome token (`Chrome/M.x.y.z`, M >= 101, not `M.0.0.0`) outside Android webviews (`; wv)`, `Version/4.0 Chrome`) and Electron |
+| `bot` | ua-parser device family `Spider`, or `agent` keyword match (bot, crawler, spider, headless, python, curl, wget, go-http, java, axios, node-fetch, scrapy, ...; not `cubot`, `javascript`), or `robots_token` match |
+| `suspected_bot` | not a bot, and `okhttp`, a missing user agent (`-`), or a full-version Chrome token (`Chrome/M.x.y.z`, M >= 101, not `M.0.0.0`) outside Android webviews (`; wv)`, `Version/4.0 Chrome`) and Electron |
 | `human` | everything else (not identified as bot) |
 | `unmapped` | no `ua_map` row (set at join time) |
 
@@ -222,15 +224,19 @@ flowchart LR
 | `{"dt":"YYYY-MM-DD","hour":H}` | one hour |
 | `{"dt":"YYYY-MM-DD"}` | whole day, use for backfill or to rebuild a day; only within the raw-log retention (90 days) |
 
+Only the first 1024 characters of a user agent are classified.
+
 The function is named `cf-logs-summarizer-<distribution-id>`, or `cf-logs-summarizer-multiple-ids` when several ids are configured.
 
 Backfill one day:
 
 ```
 aws lambda invoke --function-name cf-logs-summarizer-<distribution-id> \
-  --cli-binary-format raw-in-base64-out \
+  --invocation-type RequestResponse --cli-binary-format raw-in-base64-out \
   --payload '{"dt":"2025-01-31"}' /dev/stdout
 ```
+
+Backfills should use `--invocation-type RequestResponse`: the error comes back to the caller, while a failed async (`Event`) run is retried and only ends in the failed-events queue.
 
 ### Tables
 
@@ -250,7 +256,7 @@ aws lambda invoke --function-name cf-logs-summarizer-<distribution-id> \
 | cs_user_agent | raw value as logged (key) |
 | family, os, device | ua-parser output (on the URL-decoded value) |
 | ua_class | `bot`, `suspected_bot` or `human` |
-| agent | regex match, empty if none |
+| agent | keyword match (the surrounding word, e.g. `googlebot`), empty if none |
 | robots_token | longest matching token, empty if none |
 | parser_version | see Run behaviour |
 
@@ -294,7 +300,9 @@ The expiry rules exist only when the module creates the results bucket (`s3_resu
 
 ### Lambda layer
 
-Dependencies (`summarizer/requirements.txt`) are built by the `summarizer-layer` workflow when that file changes and committed as `summarizer/layer.zip`. The layer is prebuilt in CI and committed; Terraform only zips `handler.py` (`archive_file`) at plan time.
+Dependencies (`summarizer/requirements.txt`, pinned with hashes and installed with `--require-hashes`) are built by the `summarizer-layer` workflow when that file changes and committed as `summarizer/layer.zip`. The layer is prebuilt in CI and committed; Terraform only zips `handler.py` (`archive_file`) at plan time.
+
+The `build` job (read-only) builds the layer and runs the tests; the `commit` job pushes `layer.zip` to the PR branch and runs no PR code. A manual run of the workflow checks that the committed layer is reproducible.
 
 ### Known limits
 
@@ -345,14 +353,14 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 |------|---------|
 | terraform | >= 1.10 |
 | archive | >= 2.0 |
-| aws | >= 6.0 |
+| aws | >= 6.44 |
 
 ### Providers
 
 | Name | Version |
 |------|---------|
 | archive | >= 2.0 |
-| aws | >= 6.0 |
+| aws | >= 6.44 |
 
 ### Modules
 
@@ -368,7 +376,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_athena_named_query.detect_outliers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_named_query) | resource |
 | [aws_athena_workgroup.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/athena_workgroup) | resource |
 | [aws_cloudwatch_log_group.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
-| [aws_cloudwatch_metric_alarm.summarizer_errors](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
+| [aws_cloudwatch_metric_alarm.summarizer_failed_events](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.summarizer_not_running](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_glue_catalog_database.cloudfront_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_database) | resource |
 | [aws_glue_catalog_table.cf_bot_errors_hourly](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
@@ -386,9 +394,11 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_iam_role_policy.summarizer_scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy_attachment.attach_grafana_athena_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_lambda_function.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_function_event_invoke_config.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function_event_invoke_config) | resource |
 | [aws_lambda_layer_version.summarizer_deps](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_layer_version) | resource |
 | [aws_s3_object.robots_agents](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_object) | resource |
 | [aws_scheduler_schedule.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) | resource |
+| [aws_sqs_queue.summarizer_failed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue) | resource |
 | [archive_file.summarizer](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_policy_document.grafana_athena_assume_role_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
@@ -424,6 +434,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | grafana\_role\_arn | ARN of the IAM role for Grafana access |
 | s3\_results\_bucket | S3 bucket for analysis results |
 | summaries\_alarm\_arns | ARNs of the summarizer CloudWatch alarms (empty when summaries are disabled) |
+| summaries\_failed\_queue\_url | URL of the SQS queue receiving summarizer events that failed after all retries (null when summaries are disabled) |
 | summaries\_glue\_tables | Glue tables created for summaries (null when disabled) |
 | summaries\_lambda\_name | Name of the summarizer Lambda (null when summaries are disabled) |
 <!-- END_TF_DOCS -->

@@ -45,7 +45,12 @@ output "summaries_glue_tables" {
   } : null
 }
 
+output "summaries_failed_queue_url" {
+  description = "URL of the SQS queue receiving summarizer events that failed after all retries (null when summaries are disabled)"
+  value       = one(aws_sqs_queue.summarizer_failed[*].url)
+}
+
 output "summaries_alarm_arns" {
   description = "ARNs of the summarizer CloudWatch alarms (empty when summaries are disabled)"
-  value       = concat(aws_cloudwatch_metric_alarm.summarizer_errors[*].arn, aws_cloudwatch_metric_alarm.summarizer_not_running[*].arn)
+  value       = concat(aws_cloudwatch_metric_alarm.summarizer_failed_events[*].arn, aws_cloudwatch_metric_alarm.summarizer_not_running[*].arn)
 }

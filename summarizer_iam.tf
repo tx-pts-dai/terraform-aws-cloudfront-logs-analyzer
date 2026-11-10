@@ -47,9 +47,30 @@ data "aws_iam_policy_document" "summarizer" {
   }
 
   statement {
+    sid       = "ListRawLogs"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${var.s3_parquet_bucket.name}"]
+
+    dynamic "condition" {
+      for_each = local.s3_parquet_bucket_sanitized_prefix == "" ? [] : [1]
+      content {
+        test     = "StringLike"
+        variable = "s3:prefix"
+        values   = ["${local.s3_parquet_bucket_sanitized_prefix}*"]
+      }
+    }
+  }
+
+  statement {
+    sid       = "RawLogsBucket"
+    actions   = ["s3:GetBucketLocation", "s3:ListBucketMultipartUploads"]
+    resources = ["arn:aws:s3:::${var.s3_parquet_bucket.name}"]
+  }
+
+  statement {
     sid       = "ListBuckets"
     actions   = ["s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketMultipartUploads"]
-    resources = ["arn:aws:s3:::${var.s3_parquet_bucket.name}", local.results_arn]
+    resources = [local.results_arn]
   }
 
   statement {
@@ -72,6 +93,12 @@ data "aws_iam_policy_document" "summarizer" {
     sid       = "ReadRobots"
     actions   = ["s3:GetObject"]
     resources = ["${local.results_arn}/supporters/robots-agents/*"]
+  }
+
+  statement {
+    sid       = "FailedEvents"
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.summarizer_failed[0].arn]
   }
 }
 
@@ -100,6 +127,16 @@ data "aws_iam_policy_document" "summarizer_scheduler_assume" {
     principals {
       type        = "Service"
       identifiers = ["scheduler.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:scheduler:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:schedule-group/default"]
     }
   }
 }
