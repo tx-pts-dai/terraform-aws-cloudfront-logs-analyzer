@@ -2,7 +2,7 @@
 
 Scheduled hourly; processes the previous UTC hour. Finds user agents not yet in
 ua_dim, classifies them with ua-parser and the robots_agents tokens, and appends
-them as JSONL to ua_dim/. Then deletes and re-UNLOADs the hour partitions of
+them as gzip JSONL to ua_dim/. Then deletes and re-UNLOADs the hour partitions of
 cf_ua_hourly and cf_bot_errors_hourly.
 
 Events:
@@ -11,6 +11,7 @@ Events:
   {"dt": "YYYY-MM-DD"}          whole day
   {"reparse": true}             rewrite ua_dim with the current parser/tokens
 """
+import gzip
 import hashlib
 import json
 import os
@@ -194,10 +195,10 @@ def delete_keys(keys: list[str]) -> None:
 
 
 def write_ua_dim(rows: list[dict[str, Any]], name: str) -> str:
-    """Write rows as one JSONL object under ua_dim/ and return its key."""
-    key = f"{UA_DIM_PREFIX}{name}.jsonl"
+    """Write rows as one gzip JSONL object under ua_dim/ and return its key."""
+    key = f"{UA_DIM_PREFIX}{name}.jsonl.gz"
     body = "".join(json.dumps(r) + "\n" for r in rows)
-    s3.put_object(Bucket=RESULTS_BUCKET, Key=key, Body=body.encode())
+    s3.put_object(Bucket=RESULTS_BUCKET, Key=key, Body=gzip.compress(body.encode()))
     return key
 
 
@@ -221,7 +222,8 @@ def reparse(tokens: list[str]) -> int:
     # ponytail: all ua_dim rows held in memory (~1M UAs would exceed 1024 MB); stream to /tmp and upload_file
     first_seen: dict[str, str] = {}
     for key in old_keys:
-        body = s3.get_object(Bucket=RESULTS_BUCKET, Key=key)["Body"].read().decode()
+        raw = s3.get_object(Bucket=RESULTS_BUCKET, Key=key)["Body"].read()
+        body = (gzip.decompress(raw) if key.endswith(".gz") else raw).decode()
         for line in body.splitlines():
             if line.strip():
                 old = json.loads(line)
