@@ -82,3 +82,29 @@ resource "aws_lambda_function" "summarizer" {
 
   tags = merge(var.tags, local.common_tags, { Name = local.summarizer_name })
 }
+
+resource "aws_sqs_queue" "summarizer_failed" {
+  count = var.summaries.enable ? 1 : 0
+
+  name                      = "${local.summarizer_name}-failed"
+  sqs_managed_sse_enabled   = true
+  message_retention_seconds = 1209600
+
+  tags = merge(var.tags, local.common_tags, { Name = "${local.summarizer_name}-failed" })
+}
+
+resource "aws_lambda_function_event_invoke_config" "summarizer" {
+  count = var.summaries.enable ? 1 : 0
+
+  function_name                = aws_lambda_function.summarizer[0].function_name
+  maximum_retry_attempts       = 2
+  maximum_event_age_in_seconds = 21600
+
+  destination_config {
+    on_failure {
+      destination = aws_sqs_queue.summarizer_failed[0].arn
+    }
+  }
+
+  depends_on = [aws_iam_role_policy.summarizer]
+}

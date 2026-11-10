@@ -42,6 +42,11 @@ variable "s3_results_bucket" {
     condition     = var.s3_results_bucket.output_prefix != ""
     error_message = "output_prefix must not be empty: an empty prefix would make the athena-results expiration rule cover the whole bucket"
   }
+
+  validation {
+    condition     = var.s3_results_bucket.output_prefix == null || endswith(var.s3_results_bucket.output_prefix, "/")
+    error_message = "output_prefix must end with \"/\" (e.g. \"athena-results/\")"
+  }
 }
 
 # Glue Database

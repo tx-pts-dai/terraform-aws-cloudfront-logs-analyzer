@@ -3,9 +3,9 @@
 Scheduled hourly; processes the previous UTC hour. Reads the distinct user agents
 of the range from the raw logs, classifies each with ua-parser and the robots_agents
 tokens (ua_class: bot, suspected_bot, human) and writes one gzip JSONL per hour to
-ua_map/dt=YYYY-MM-DD/hour=HH/map.jsonl.gz (overwritten on re-run). Then deletes and
-re-UNLOADs the hour partitions of cf_ua_hourly and cf_bot_errors_hourly, which join
-the raw logs to ua_map.
+ua_map/dt=YYYY-MM-DD/hour=HH/map.jsonl.gz (overwritten on re-run). Then re-UNLOADs the
+hour partitions of cf_ua_hourly and cf_bot_errors_hourly, which join the raw logs to
+ua_map, and deletes the files they replace once the UNLOAD succeeded.
 
 Events:
   {}                            previous hour
@@ -13,7 +13,7 @@ Events:
   {"dt": "YYYY-MM-DD"}          whole day
 
 Tokens come from the explicit robots_agents JSONL plus, when ROBOTS_URL is set,
-the user-agents of that robots.txt.
+the user-agents of that robots.txt (https only).
 """
 import codecs
 import csv
@@ -39,15 +39,26 @@ RESULTS_BUCKET = os.environ.get("RESULTS_BUCKET", "")
 ROBOTS_KEY = os.environ.get("ROBOTS_KEY", "")
 ROBOTS_URL = os.environ.get("ROBOTS_URL", "")
 
-RULES_VERSION = "rules-1"
+RULES_VERSION = "rules-2"
 CHROME_RE = re.compile(r"Chrome/(\d+)\.(\d+)\.(\d+)\.(\d+)")
 USER_AGENT_LINE_RE = re.compile(r"^\s*user-agent:([^#\r\n]*)", re.I | re.M)
 SUMMARIES = ("cf_ua_hourly", "cf_bot_errors_hourly")
-
-AGENT_RE = re.compile(
-    r"([a-z0-9_.-]*(bot|crawler|spider|headless|lightpanda|thinkers|magentanews|python|curl|wget"
-    r"|go-http|okhttp|java|axios|node-fetch|scrapy)[a-z0-9_.-]*)"
+UA_MAX_LEN = 1024
+AGENT_CTX = 64
+ROBOTS_MAX_BYTES = 1_048_576
+ROBOTS_BUDGET_S = 10
+URL_TOKEN_MIN_LEN = 4
+URL_TOKEN_DENY = frozenset(
+    {"mozilla", "applewebkit", "gecko", "chrome", "safari", "android", "iphone", "windows", "linux", "mobile", "yandex"}
 )
+
+# okhttp is also used by human-driven apps, so it only makes a suspected_bot
+KEY_RE = re.compile(
+    r"(?<!cu)bot|crawler|spider|headless|lightpanda|thinkers|magentanews|python|curl|wget"
+    r"|go-http|java(?!script)|axios|node-fetch|scrapy|(?P<weak>okhttp)"
+)
+AGENT_HEAD_RE = re.compile(r"[a-z0-9_.-]*$")
+AGENT_TAIL_RE = re.compile(r"[a-z0-9_.-]{0,%d}" % AGENT_CTX)
 
 MAP_SQL = """
 SELECT hour, coalesce(cs_user_agent, '-') AS cs_user_agent
@@ -145,17 +156,27 @@ def is_suspected_bot(ua: str) -> bool:
     return not ("; wv)" in ua or "Version/4.0 Chrome" in ua or "Electron/" in ua)
 
 
+def find_agent(low: str) -> tuple[str, bool]:
+    """Return the [a-z0-9_.-] word around the first strong keyword hit, else the first weak one ('' if none), and whether it is weak."""
+    hits = list(KEY_RE.finditer(low))
+    m = next((h for h in hits if h.group("weak") is None), hits[0] if hits else None)
+    if not m:
+        return "", False
+    head = AGENT_HEAD_RE.search(low[max(0, m.start() - AGENT_CTX) : m.start()])
+    tail = AGENT_TAIL_RE.match(low, m.end())
+    return head.group() + m.group() + tail.group(), m.group("weak") is not None
+
+
 def classify(raw: str, tokens: list[str]) -> dict[str, Any]:
-    """Classify a raw user agent into a ua_map row; suspected_bot also flags desktop apps embedding Chromium (QtWebEngine, CEF) and webviews without "; wv)"."""
-    ua = unquote(raw)
+    """Classify a raw user agent into a ua_map row; suspected_bot also flags desktop apps embedding Chromium (QtWebEngine, CEF), webviews without "; wv)", okhttp and a missing UA."""
+    ua = unquote(raw[:UA_MAX_LEN])
     r = parse(ua).with_defaults()
-    m = AGENT_RE.search(ua.lower())
-    agent = m.group(1) if m else ""
+    agent, weak = find_agent(ua.lower())
     token = match_token(ua, tokens)
-    if r.device.family == "Spider" or agent or token:
+    if r.device.family == "Spider" or (agent and not weak) or token:
         ua_class = "bot"
     else:
-        ua_class = "suspected_bot" if is_suspected_bot(ua) else "human"
+        ua_class = "suspected_bot" if weak or raw in ("", "-") or is_suspected_bot(ua) else "human"
     return {
         "cs_user_agent": raw,
         "family": r.user_agent.family,
@@ -194,16 +215,37 @@ def read_tokens(key: str) -> list[str] | None:
     return [json.loads(line)["token"] for line in body.splitlines() if line.strip()]
 
 
+def filter_url_tokens(tokens: list[str]) -> list[str]:
+    """Drop tokens too short or generic to identify an agent; applied to URL tokens only."""
+    return [t for t in tokens if len(t) >= URL_TOKEN_MIN_LEN and t.lower() not in URL_TOKEN_DENY]
+
+
+def read_capped(resp: Any) -> bytes:
+    """Read at most ROBOTS_MAX_BYTES within ROBOTS_BUDGET_S seconds; raise on timeout."""
+    end = time.monotonic() + ROBOTS_BUDGET_S
+    buf = bytearray()
+    while len(buf) < ROBOTS_MAX_BYTES:
+        if time.monotonic() > end:
+            raise TimeoutError(f"read exceeded {ROBOTS_BUDGET_S}s")
+        chunk = resp.read1(min(65536, ROBOTS_MAX_BYTES - len(buf)))
+        if not chunk:
+            break
+        buf += chunk
+    return bytes(buf)
+
+
 def url_tokens() -> list[str]:
     """Fetch tokens from ROBOTS_URL; empty on any failure."""
     if not ROBOTS_URL:
         return []
     try:
-        if urlparse(ROBOTS_URL).scheme not in ("http", "https"):
-            raise ValueError(f"unsupported scheme in {ROBOTS_URL}")
+        if urlparse(ROBOTS_URL).scheme != "https":
+            raise ValueError("ROBOTS_URL must use https")
         req = urllib.request.Request(ROBOTS_URL, headers={"User-Agent": "cf-logs-summarizer"})
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-            return parse_robots_txt(resp.read().decode("utf-8", errors="replace"))
+            if urlparse(resp.url).scheme != "https":
+                raise ValueError("robots.txt redirected to a non-https URL")
+            return filter_url_tokens(parse_robots_txt(read_capped(resp).decode("utf-8", errors="replace")))
     except Exception as e:  # noqa: BLE001
         print(f"WARNING: robots.txt fetch failed ({e}); using explicit tokens only")
         return []
@@ -236,6 +278,12 @@ def run_query(sql: str, params: list[str] | None = None, deadline: float | None 
             raise RuntimeError(f"Athena query {qid} {state}: {status.get('StateChangeReason', '')}")
         if deadline is not None and time.monotonic() > deadline:
             athena.stop_query_execution(QueryExecutionId=qid)
+            settle = time.monotonic() + 15
+            while time.monotonic() < settle:
+                state = athena.get_query_execution(QueryExecutionId=qid)["QueryExecution"]["Status"]["State"]
+                if state in ("CANCELLED", "FAILED", "SUCCEEDED"):
+                    break
+                time.sleep(1)
             raise RuntimeError(f"Athena query {qid} stopped: Lambda out of time")
         time.sleep(delay)
         delay = min(delay * 1.5, 10.0)
@@ -308,18 +356,23 @@ def write_ua_map(dt: str, lo: int, hi: int, tokens: list[str], deadline: float |
 
 
 def rebuild_summaries(dt: str, lo: int, hi: int, deadline: float | None = None) -> None:
-    """Delete and re-UNLOAD the summary partitions for the range."""
+    """UNLOAD the summary partitions for the range, then delete the files they replace; on failure delete the new files."""
     for table in SUMMARIES:
-        delete_keys(
-            [k for h in range(lo, hi + 1) for k in list_keys(f"summaries/{table}/dt={dt}/hour={h:02d}/")]
-        )
+        prefixes = [f"summaries/{table}/dt={dt}/hour={h:02d}/" for h in range(lo, hi + 1)]
+        old = {k for p in prefixes for k in list_keys(p)}
         location = f"s3://{RESULTS_BUCKET}/summaries/{table}/"
-        run_query(UNLOAD_SQL[table].format(location=location), unload_params(dt, lo, hi), deadline)
+        try:
+            run_query(UNLOAD_SQL[table].format(location=location), unload_params(dt, lo, hi), deadline)
+        except Exception:
+            delete_keys(sorted({k for p in prefixes for k in list_keys(p)} - old))
+            raise
+        delete_keys(sorted(old))
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entry point."""
     tokens = load_tokens()
+    print(f"tokens: {len(tokens)}")
     dt, lo, hi = parse_event(event, datetime.now(timezone.utc))
     deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - 20
     mapped = write_ua_map(dt, lo, hi, tokens, deadline)
