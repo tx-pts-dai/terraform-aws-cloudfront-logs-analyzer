@@ -1,10 +1,9 @@
 locals {
-  summarizer_name     = "cf-logs-summarizer-${local.distribution_ids_name}"
-  summarizer_src      = "${path.module}/summarizer"
-  robots_key          = "supporters/robots-agents/robots_agents.json"
-  robots_from_url_key = "supporters/robots-agents/from_url.json"
-  results_arn         = "arn:aws:s3:::${local.s3_results_bucket_name}"
-  glue_arn_prefix     = "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
+  summarizer_name = "cf-logs-summarizer-${local.distribution_ids_name}"
+  summarizer_src  = "${path.module}/summarizer"
+  robots_key      = "supporters/robots-agents/robots_agents.json"
+  results_arn     = "arn:aws:s3:::${local.s3_results_bucket_name}"
+  glue_arn_prefix = "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
 
 }
 

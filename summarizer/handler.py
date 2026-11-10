@@ -14,7 +14,7 @@ Events:
   {"reparse": true}             rewrite ua_dim with the current parser/tokens
 
 Tokens come from the explicit robots_agents JSONL plus, when ROBOTS_URL is set,
-the user-agents of that robots.txt (last good copy kept in from_url.json).
+the user-agents of that robots.txt.
 """
 import codecs
 import csv
@@ -41,7 +41,6 @@ RESULTS_BUCKET = os.environ.get("RESULTS_BUCKET", "")
 ROBOTS_KEY = os.environ.get("ROBOTS_KEY", "")
 ROBOTS_URL = os.environ.get("ROBOTS_URL", "")
 MIN_DAILY_REQUESTS = int(os.environ.get("MIN_DAILY_REQUESTS", "100"))
-ROBOTS_FROM_URL_KEY = "supporters/robots-agents/from_url.json"
 
 UA_DIM_PREFIX = "ua_dim/"
 REPARSE_CHUNK = 100_000
@@ -172,8 +171,8 @@ def read_tokens(key: str) -> list[str] | None:
     return [json.loads(line)["token"] for line in body.splitlines() if line.strip()]
 
 
-def url_tokens(explicit: list[str]) -> list[str]:
-    """Fetch tokens from ROBOTS_URL and store them; on failure use the last stored copy."""
+def url_tokens() -> list[str]:
+    """Fetch tokens from ROBOTS_URL; empty on any failure."""
     if not ROBOTS_URL:
         return []
     try:
@@ -181,27 +180,16 @@ def url_tokens(explicit: list[str]) -> list[str]:
             raise ValueError(f"unsupported scheme in {ROBOTS_URL}")
         req = urllib.request.Request(ROBOTS_URL, headers={"User-Agent": "cf-logs-summarizer"})
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-            tokens = parse_robots_txt(resp.read().decode("utf-8", errors="replace"))
-        if not tokens:
-            raise ValueError("no user-agent entries found")
+            return parse_robots_txt(resp.read().decode("utf-8", errors="replace"))
     except Exception as e:  # noqa: BLE001
-        print(f"WARNING: robots.txt fetch failed ({e}); using last stored copy")
-        return read_tokens(ROBOTS_FROM_URL_KEY) or []
-    seen = {t.lower() for t in explicit}
-    rows = [
-        {"token": t, "operator": "", "purpose": "other", "notes": "from robots_agents_url"}
-        for t in tokens
-        if t.lower() not in seen
-    ]
-    body = "".join(json.dumps(r) + "\n" for r in rows)
-    s3.put_object(Bucket=RESULTS_BUCKET, Key=ROBOTS_FROM_URL_KEY, Body=body.encode())
-    return [r["token"] for r in rows]
+        print(f"WARNING: robots.txt fetch failed ({e}); using explicit tokens only")
+        return []
 
 
 def load_tokens() -> list[str]:
     """Explicit robots tokens from S3 merged with those of ROBOTS_URL."""
     explicit = read_tokens(ROBOTS_KEY) or []
-    return merge_tokens(explicit, url_tokens(explicit))
+    return merge_tokens(explicit, url_tokens())
 
 
 def run_query(sql: str, params: list[str] | None = None, deadline: float | None = None) -> str:
