@@ -309,25 +309,45 @@ resource "aws_glue_catalog_table" "robots_agents" {
   ]
 }
 
-resource "aws_glue_catalog_table" "ua_dim" {
+resource "aws_glue_catalog_table" "ua_map" {
   count = var.summaries.enable ? 1 : 0
 
-  name          = "ua_dim"
+  name          = "ua_map"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
-  description   = "Classified user agents, one row per raw cs_user_agent"
+  description   = "Classified user agents per hour, one row per raw cs_user_agent"
 
   table_type = "EXTERNAL_TABLE"
 
   parameters = merge(
     {
-      "EXTERNAL"           = "TRUE"
-      "has_encrypted_data" = "false"
+      "EXTERNAL"                    = "TRUE"
+      "has_encrypted_data"          = "false"
+      "projection.enabled"          = "true"
+      "projection.dt.type"          = "date"
+      "projection.dt.range"         = "2020-01-01,NOW"
+      "projection.dt.format"        = "yyyy-MM-dd"
+      "projection.dt.interval"      = "1"
+      "projection.dt.interval.unit" = "DAYS"
+      "projection.hour.type"        = "integer"
+      "projection.hour.range"       = "0,23"
+      "projection.hour.digits"      = "2"
+      "storage.location.template"   = "s3://${local.s3_results_bucket_name}/ua_map/dt=$${dt}/hour=$${hour}/"
     },
     local.glue_format_configs.json.table_params
   )
 
+  partition_keys {
+    name = "dt"
+    type = "string"
+  }
+
+  partition_keys {
+    name = "hour"
+    type = "string"
+  }
+
   storage_descriptor {
-    location      = "s3://${local.s3_results_bucket_name}/ua_dim/"
+    location      = "s3://${local.s3_results_bucket_name}/ua_map/"
     input_format  = local.glue_format_configs.json.input_format
     output_format = local.glue_format_configs.json.output_format
 
@@ -340,15 +360,13 @@ resource "aws_glue_catalog_table" "ua_dim" {
     dynamic "columns" {
       for_each = [
         { name = "cs_user_agent", type = "string" },
-        { name = "ua", type = "string" },
         { name = "family", type = "string" },
         { name = "os", type = "string" },
         { name = "device", type = "string" },
-        { name = "is_bot", type = "boolean" },
+        { name = "ua_class", type = "string" },
         { name = "agent", type = "string" },
         { name = "robots_token", type = "string" },
         { name = "parser_version", type = "string" },
-        { name = "first_seen", type = "string" },
       ]
       content {
         name = columns.value.name
@@ -367,7 +385,7 @@ resource "aws_glue_catalog_table" "cf_ua_hourly" {
 
   name          = "cf_ua_hourly"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
-  description   = "Hourly requests, bytes and time taken per user agent"
+  description   = "Hourly requests, bytes and time taken per parsed user agent, country and ua_class"
 
   table_type = "EXTERNAL_TABLE"
 
@@ -411,12 +429,22 @@ resource "aws_glue_catalog_table" "cf_ua_hourly" {
       for_each = [
         { name = "distributionid", type = "string" },
         { name = "host", type = "string" },
-        { name = "cs_user_agent", type = "string" },
+        { name = "country", type = "string" },
+        { name = "ua_class", type = "string" },
+        { name = "family", type = "string" },
+        { name = "os", type = "string" },
+        { name = "device", type = "string" },
+        { name = "agent", type = "string" },
+        { name = "robots_token", type = "string" },
         { name = "status_class", type = "string" },
         { name = "edge_result_type", type = "string" },
+        { name = "parser_version", type = "string" },
+        { name = "bot_ua", type = "string" },
         { name = "requests", type = "bigint" },
         { name = "bytes", type = "bigint" },
         { name = "time_taken_sum", type = "double" },
+        { name = "uas_hll", type = "binary" },
+        { name = "sample_ua", type = "string" },
       ]
       content {
         name = columns.value.name
@@ -435,7 +463,7 @@ resource "aws_glue_catalog_table" "cf_bot_errors_hourly" {
 
   name          = "cf_bot_errors_hourly"
   database_name = aws_glue_catalog_database.cloudfront_logs.name
-  description   = "Hourly 4xx/5xx requests from bots per path"
+  description   = "Hourly 4xx/5xx requests from bots and suspected bots per path"
 
   table_type = "EXTERNAL_TABLE"
 
@@ -480,7 +508,13 @@ resource "aws_glue_catalog_table" "cf_bot_errors_hourly" {
         { name = "distributionid", type = "string" },
         { name = "host", type = "string" },
         { name = "path", type = "string" },
-        { name = "cs_user_agent", type = "string" },
+        { name = "country", type = "string" },
+        { name = "ua_class", type = "string" },
+        { name = "family", type = "string" },
+        { name = "os", type = "string" },
+        { name = "agent", type = "string" },
+        { name = "robots_token", type = "string" },
+        { name = "bot_ua", type = "string" },
         { name = "sc_status", type = "string" },
         { name = "requests", type = "bigint" },
       ]

@@ -118,6 +118,7 @@ module "global_logs_analyzer" {
   summaries = {
     enable            = true
     robots_agents_url = "https://www.tagesanzeiger.ch/robots.txt"
+    alarm_actions     = ["arn:aws:sns:eu-central-1:123456789012:alerts"]
   }
 }
 ```
@@ -183,34 +184,43 @@ Optional (`summaries.enable = true`). An hourly Lambda classifies user agents an
 flowchart LR
   CF[CloudFront] -->|Parquet logs| Logs[(Log bucket<br>cloudfront_logs_parquet)]
   Sched[EventBridge Scheduler<br>hourly at :20 UTC] --> Fn[Summarizer Lambda]
-  Fn -->|queries| Ath[Athena workgroup]
-  Ath -->|reads| Logs
+  Web[robots.txt URL<br>optional] -->|fetched hourly| Fn
   Robots[(robots_agents<br>S3 object)] -->|tokens| Fn
-  TF[Terraform<br>var list + robots.txt URL] -.->|plan: fetch URL / apply: write object| Robots
-  Fn -->|writes JSONL.gz| UA[(ua_dim/)]
-  Ath -->|UNLOAD Parquet| Sum[(summaries/<br>cf_ua_hourly<br>cf_bot_errors_hourly)]
-  UA --> Glue[Glue tables]
+  Fn -->|map query: distinct UAs| Ath[Athena workgroup]
+  Ath -->|reads| Logs
+  Fn -->|classifies, writes gzip JSONL<br>per hour, 90-day expiry| Map[(ua_map/)]
+  Ath -->|UNLOAD: raw logs JOIN ua_map| Sum[(summaries/<br>cf_ua_hourly<br>cf_bot_errors_hourly)]
+  Map --> Glue[Glue tables]
   Sum --> Glue
   Glue --> Graf[Grafana]
 ```
 
 ### Run behaviour
 
-- Processes the previous UTC hour (schedule `cron(20 * * * ? *)`, `summaries.schedule`).
-- Step 1: user agents not yet in `ua_dim` are classified and appended as a new gzip-compressed JSONL object (`*.jsonl.gz`). Older plain `.jsonl` files remain readable.
-  - `is_bot`: ua-parser device family is `Spider`.
-  - `agent`: match of a regex for common bot/client names (`bot`, `crawler`, `curl`, `python`, ...).
-  - `robots_token`: longest `robots_agents` token contained in the UA.
-- Step 2: the hour partitions of both summaries are deleted, then re-written with Athena `UNLOAD`. Re-runs are idempotent.
-- Reserved concurrency is 1 (`ua_dim` is append-only).
-- The Lambda stops the running Athena query and fails when less than 20 s remain.
+- Per hour (default: previous UTC hour, `scheduled_time` from the scheduler; schedule `cron(20 * * * ? *)`, `summaries.schedule`):
+  - Athena lists the distinct user agents; the Lambda classifies each (family, os, device, agent, robots_token, ua_class, parser_version) and writes the `ua_map` hour.
+  - The hour partitions of both summaries are deleted, then re-written with Athena `UNLOAD` joining the raw logs to `ua_map`. Re-runs are idempotent.
+- No user agents for the hour: the run fails (alarm + async retry); existing partitions stay untouched.
+- Rows missing from the map (late-arriving log files) get `ua_class = 'unmapped'`.
+- Reserved concurrency is 1. The Lambda stops the running Athena query and fails when less than 20 s remain.
+- `parser_version`: ua-parser release + hash of the tokens + rules version (`rules-N`, bumped when the `ua_class` rules change).
+
+`ua_class`, first match wins:
+
+| Value | Condition |
+|-------|-----------|
+| `bot` | ua-parser device family `Spider`, or `agent` regex match, or `robots_token` match |
+| `suspected_bot` | not a bot, and a full-version Chrome token (`Chrome/M.x.y.z`, M >= 101, not `M.0.0.0`) outside Android webviews (`; wv)`, `Version/4.0 Chrome`) and Electron |
+| `human` | everything else (not identified as bot) |
+| `unmapped` | no `ua_map` row (set at join time) |
+
+`suspected_bot` is a heuristic: Chromium-embedding desktop apps (QtWebEngine, CEF) and custom webviews are flagged too.
 
 | Event | Effect |
 |-------|--------|
 | `{}` | previous hour |
 | `{"dt":"YYYY-MM-DD","hour":H}` | one hour |
-| `{"dt":"YYYY-MM-DD"}` | whole day, use for backfill |
-| `{"reparse": true}` | re-classify all `ua_dim` rows after a ua-parser or robots change; `parser_version` shows which version classified a row |
+| `{"dt":"YYYY-MM-DD"}` | whole day, use for backfill or to rebuild a day; only within the raw-log retention (90 days) |
 
 The function is named `cf-logs-summarizer-<distribution-id>`, or `cf-logs-summarizer-multiple-ids` when several ids are configured.
 
@@ -224,7 +234,7 @@ aws lambda invoke --function-name cf-logs-summarizer-<distribution-id> \
 
 ### Tables
 
-`robots_agents` (JSON): one row per robots.txt token.
+`robots_agents` (JSON): one row per explicit token (`summaries.robots_agents`).
 
 | Column | Meaning |
 |--------|---------|
@@ -233,43 +243,54 @@ aws lambda invoke --function-name cf-logs-summarizer-<distribution-id> \
 | purpose | `search`, `ai-training`, `ai-search`, `ai-user`, `ads` or `other` |
 | notes | free text |
 
-`ua_dim` (gzip JSONL): one row per raw `cs_user_agent`.
+`ua_map` (gzip JSONL, partitions `dt`, `hour`): one row per raw `cs_user_agent` and hour.
 
 | Column | Meaning |
 |--------|---------|
 | cs_user_agent | raw value as logged (key) |
-| ua | URL-decoded value |
-| family, os, device | ua-parser output |
-| is_bot | device family is `Spider` |
+| family, os, device | ua-parser output (on the URL-decoded value) |
+| ua_class | `bot`, `suspected_bot` or `human` |
 | agent | regex match, empty if none |
 | robots_token | longest matching token, empty if none |
-| parser_version | ua-parser version + hash of the tokens |
-| first_seen | `YYYY-MM-DD HH` of first sighting |
+| parser_version | see Run behaviour |
 
-`cf_ua_hourly` (Parquet, partitions `dt`, `hour`): grain = distribution, host, user agent, status class, edge result type, hour.
+`cf_ua_hourly` (Parquet, partitions `dt`, `hour`): grain = distribution, host, country, parsed user agent, status class, edge result type, hour.
 
 | Column | Meaning |
 |--------|---------|
-| distributionid, host, cs_user_agent | dimensions |
+| distributionid, host, country | dimensions |
+| ua_class, family, os, device, agent, robots_token, parser_version | from `ua_map` (`unmapped`, empty strings if missing) |
+| bot_ua | raw user agent, only for `ua_class = 'bot'` |
 | status_class | `2xx`, `4xx`, ... |
 | edge_result_type | `x_edge_result_type` |
 | requests, bytes, time_taken_sum | count, sum of `sc_bytes`, sum of `time_taken` |
+| uas_hll | HyperLogLog of the raw user agents |
+| sample_ua | one raw user agent of the group |
 
-`cf_bot_errors_hourly` (Parquet, partitions `dt`, `hour`): 4xx/5xx of bot user agents (`is_bot` or `agent` set); grain = distribution, host, path, user agent, status, hour.
+Distinct user agents across hours:
+
+```sql
+SELECT cardinality(merge(cast(uas_hll AS HyperLogLog))) FROM cf_ua_hourly WHERE dt = '2025-01-31'
+```
+
+`cf_bot_errors_hourly` (Parquet, partitions `dt`, `hour`): 4xx/5xx of `bot` and `suspected_bot`; grain = distribution, host, path, country, user agent class, status, hour.
 
 | Column | Meaning |
 |--------|---------|
-| distributionid, host, path, cs_user_agent, sc_status | dimensions |
+| distributionid, host, path, country, sc_status | dimensions |
+| ua_class, family, os, agent, robots_token, bot_ua | as in `cf_ua_hourly` |
 | requests | count |
 
 ### Results bucket layout
 
 | Prefix | Content |
 |--------|---------|
-| `athena-results/` | Athena query results (default `output_prefix`); expire after `results_expiration_days` only when the module creates the bucket (`s3_results_bucket.create = true`) |
+| `athena-results/` | Athena query results (default `output_prefix`); expire after `results_expiration_days` |
 | `supporters/robots-agents/` | `robots_agents.json`, written by Terraform |
-| `ua_dim/` | classified user agents, gzip JSONL (`*.jsonl.gz`) |
-| `summaries/cf_ua_hourly/`, `summaries/cf_bot_errors_hourly/` | `dt=YYYY-MM-DD/hour=HH/` Parquet |
+| `ua_map/` | `dt=YYYY-MM-DD/hour=HH/map.jsonl.gz`; expires after 90 days |
+| `summaries/cf_ua_hourly/`, `summaries/cf_bot_errors_hourly/` | `dt=YYYY-MM-DD/hour=HH/` Parquet, no expiry |
+
+The expiry rules exist only when the module creates the results bucket (`s3_results_bucket.create = true`); otherwise add equivalent lifecycle rules yourself.
 
 ### Lambda layer
 
@@ -277,8 +298,10 @@ Dependencies (`summarizer/requirements.txt`) are built by the `summarizer-layer`
 
 ### Known limits
 
-- `reparse` holds all `ua_dim` rows in memory (1024 MB Lambda).
-- `robots_agents_url` is fetched at plan time: a non-200 response ignores the URL tokens, an unreachable host fails the plan.
+- Classification is frozen once raw logs expire: a `{dt}` re-run only rebuilds days still in the raw logs (90 days).
+- Whole-day re-runs must fit the 900 s Lambda timeout.
+- `suspected_bot` is a heuristic (see above).
+- If the `robots_agents_url` fetch fails, only the explicit tokens are used for that run.
 - Only the previous hour is processed automatically; log delivery lag was measured at 7 min or less.
 
 ## Workgroup guardrails
@@ -354,7 +377,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_glue_catalog_table.ip_geolocation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.ip_whitelist](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_glue_catalog_table.robots_agents](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
-| [aws_glue_catalog_table.ua_dim](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
+| [aws_glue_catalog_table.ua_map](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glue_catalog_table) | resource |
 | [aws_iam_policy.grafana_athena_query_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.grafana](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.summarizer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
@@ -388,7 +411,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | s3\_parquet\_bucket | Configuration for the existing S3 bucket where CloudFront logs in Parquet format are stored | ```object({ name = string logs_prefix = string })``` | n/a | yes |
 | s3\_results\_bucket | Configuration for the S3 bucket where analysis results will be stored | ```object({ create = bool name = optional(string) output_prefix = optional(string) results_expiration_days = optional(number, 30) lifecycle_rules = optional(list(any), []) })``` | n/a | yes |
 | s3\_supporters\_files | Configuration for the S3 bucket where supporter data files are stored | ```object({ ip_whitelist_fullpath = optional(string) ip_whitelist_format = optional(string, "parquet") ip_geolocation_fullpath = optional(string) })``` | `{}` | no |
-| summaries | Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm\_actions: SNS topic ARNs notified when the summarizer fails or stops running. min\_daily\_requests: a user agent is classified once it has at least this many requests in a UTC day. The not-running alarm assumes the default hourly schedule. | ```object({ enable = bool schedule = optional(string, "cron(20 * * * ? *)") alarm_actions = optional(list(string), []) min_daily_requests = optional(number, 100) robots_agents_url = optional(string, "") robots_agents = optional(list(object({ token = string operator = string purpose = string notes = optional(string, "") })), [ { token = "GPTBot", operator = "OpenAI", purpose = "ai-training" }, { token = "ClaudeBot", operator = "Anthropic", purpose = "ai-training" }, { token = "Google-Extended", operator = "Google", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Applebot-Extended", operator = "Apple", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Meta-ExternalAgent", operator = "Meta", purpose = "ai-training" }, { token = "Googlebot", operator = "Google", purpose = "search" }, { token = "Bingbot", operator = "Microsoft", purpose = "search" }, { token = "Applebot", operator = "Apple", purpose = "search" }, { token = "OAI-SearchBot", operator = "OpenAI", purpose = "ai-search" }, { token = "PerplexityBot", operator = "Perplexity", purpose = "ai-search" }, { token = "Claude-SearchBot", operator = "Anthropic", purpose = "ai-search" }, { token = "Meta-WebIndexer", operator = "Meta", purpose = "ai-search" }, { token = "ChatGPT-User", operator = "OpenAI", purpose = "ai-user" }, { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" }, { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" }, { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" }, ]) })``` | ```{ "enable": false }``` | no |
+| summaries | Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them. alarm\_actions: SNS topic ARNs notified when the summarizer fails or stops running. The not-running alarm assumes the default hourly schedule. | ```object({ enable = bool schedule = optional(string, "cron(20 * * * ? *)") alarm_actions = optional(list(string), []) robots_agents_url = optional(string, "") robots_agents = optional(list(object({ token = string operator = string purpose = string notes = optional(string, "") })), [ { token = "GPTBot", operator = "OpenAI", purpose = "ai-training" }, { token = "ClaudeBot", operator = "Anthropic", purpose = "ai-training" }, { token = "Google-Extended", operator = "Google", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Applebot-Extended", operator = "Apple", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" }, { token = "Meta-ExternalAgent", operator = "Meta", purpose = "ai-training" }, { token = "Googlebot", operator = "Google", purpose = "search" }, { token = "Bingbot", operator = "Microsoft", purpose = "search" }, { token = "Applebot", operator = "Apple", purpose = "search" }, { token = "OAI-SearchBot", operator = "OpenAI", purpose = "ai-search" }, { token = "PerplexityBot", operator = "Perplexity", purpose = "ai-search" }, { token = "Claude-SearchBot", operator = "Anthropic", purpose = "ai-search" }, { token = "Meta-WebIndexer", operator = "Meta", purpose = "ai-search" }, { token = "ChatGPT-User", operator = "OpenAI", purpose = "ai-user" }, { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" }, { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" }, { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" }, ]) })``` | ```{ "enable": false }``` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 
 ### Outputs

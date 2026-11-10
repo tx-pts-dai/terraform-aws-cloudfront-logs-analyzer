@@ -63,7 +63,7 @@ data "aws_iam_policy_document" "summarizer" {
     ]
     resources = [
       "${local.results_arn}/${local.s3_results_bucket_prefix}*",
-      "${local.results_arn}/ua_dim/*",
+      "${local.results_arn}/ua_map/*",
       "${local.results_arn}/summaries/*",
     ]
   }
