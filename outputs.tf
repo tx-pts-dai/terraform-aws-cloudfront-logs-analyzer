@@ -28,3 +28,19 @@ output "grafana_role_arn" {
   description = "ARN of the IAM role for Grafana access"
   value       = aws_iam_role.grafana[0].arn
 }
+
+# Summaries
+output "summaries_lambda_name" {
+  description = "Name of the summarizer Lambda (null when summaries are disabled)"
+  value       = one(aws_lambda_function.summarizer[*].function_name)
+}
+
+output "summaries_glue_tables" {
+  description = "Glue tables created for summaries (null when disabled)"
+  value = var.summaries.enable ? {
+    robots_agents        = aws_glue_catalog_table.robots_agents[0].name
+    ua_dim               = aws_glue_catalog_table.ua_dim[0].name
+    cf_ua_hourly         = aws_glue_catalog_table.cf_ua_hourly[0].name
+    cf_bot_errors_hourly = aws_glue_catalog_table.cf_bot_errors_hourly[0].name
+  } : null
+}

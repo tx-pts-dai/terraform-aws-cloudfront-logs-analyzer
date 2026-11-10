@@ -1,0 +1,41 @@
+name: summarizer-layer
+
+on:
+  pull_request:
+    paths:
+      - summarizer/requirements.txt
+      - .github/workflows/summarizer-layer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build layer
+        run: |
+          pip install -r summarizer/requirements.txt \
+            --platform manylinux2014_x86_64 --python-version 3.12 --only-binary=:all: \
+            -t build/python
+          cd build && zip -qrX layer.zip python
+          mv -f layer.zip ../summarizer/layer.zip
+
+      - name: Commit layer
+        run: |
+          if [ -n "$(git status --porcelain summarizer/layer.zip)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add summarizer/layer.zip
+            git commit -m "Rebuild summarizer layer"
+            git push
+          fi

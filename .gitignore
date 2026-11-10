@@ -39,3 +39,6 @@ override.tf.json
 # example: *tfplan*
 
 .DS_Store
+
+# Summarizer Lambda build artifacts
+summarizer/function.zip

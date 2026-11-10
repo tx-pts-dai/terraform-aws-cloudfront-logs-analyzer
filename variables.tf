@@ -110,3 +110,48 @@ variable "athena_custom_named_queries" {
   }))
   default = []
 }
+
+# Summaries
+variable "summaries" {
+  description = "Hourly UA summaries (Athena UNLOAD to Parquet) and the Lambda that builds them"
+  type = object({
+    enable   = bool
+    schedule = optional(string, "cron(20 * * * ? *)")
+
+    robots_agents_url = optional(string)
+    robots_agents = optional(list(object({
+      token    = string
+      operator = string
+      purpose  = string
+      notes    = optional(string, "")
+      })), [
+      { token = "GPTBot", operator = "OpenAI", purpose = "ai-training" },
+      { token = "ClaudeBot", operator = "Anthropic", purpose = "ai-training" },
+      { token = "Google-Extended", operator = "Google", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" },
+      { token = "Applebot-Extended", operator = "Apple", purpose = "ai-training", notes = "robots.txt-only token, never sent as UA" },
+      { token = "Meta-ExternalAgent", operator = "Meta", purpose = "ai-training" },
+      { token = "Googlebot", operator = "Google", purpose = "search" },
+      { token = "Bingbot", operator = "Microsoft", purpose = "search" },
+      { token = "Applebot", operator = "Apple", purpose = "search" },
+      { token = "OAI-SearchBot", operator = "OpenAI", purpose = "ai-search" },
+      { token = "PerplexityBot", operator = "Perplexity", purpose = "ai-search" },
+      { token = "Claude-SearchBot", operator = "Anthropic", purpose = "ai-search" },
+      { token = "Meta-WebIndexer", operator = "Meta", purpose = "ai-search" },
+      { token = "ChatGPT-User", operator = "OpenAI", purpose = "ai-user" },
+      { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" },
+      { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" },
+      { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" },
+    ])
+  })
+  default = {
+    enable = false
+  }
+
+  validation {
+    condition = alltrue([
+      for a in var.summaries.robots_agents :
+      contains(["search", "ai-training", "ai-search", "ai-user", "ads", "other"], a.purpose)
+    ])
+    error_message = "robots_agents purpose must be one of: search, ai-training, ai-search, ai-user, ads, other"
+  }
+}
