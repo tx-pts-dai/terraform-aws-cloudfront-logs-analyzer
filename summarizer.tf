@@ -5,6 +5,32 @@ locals {
   results_arn     = "arn:aws:s3:::${local.s3_results_bucket_name}"
   glue_arn_prefix = "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
 
+  # generic tokens that are not agents
+  robots_url_deny = ["mozilla", "applewebkit", "gecko", "chrome", "safari", "android", "iphone", "windows", "linux", "mobile", "yandex"]
+  robots_explicit = [for a in var.summaries.robots_agents : lower(a.token)]
+  robots_url_body = one(data.http.robots[*].response_body)
+  robots_url_raw  = local.robots_url_body == null ? [] : [for m in regexall("(?im)^[ \\t]*user-agent:([^#\\r\\n]*)", local.robots_url_body) : trimspace(m[0])]
+  robots_url_tokens = distinct([
+    for t in local.robots_url_raw : t
+    if t != "*" && length(t) >= 4 && !contains(local.robots_url_deny, lower(t)) && !contains(local.robots_explicit, lower(t))
+  ])
+  robots_agents_all = concat(
+    var.summaries.robots_agents,
+    [for t in local.robots_url_tokens : { token = t, operator = "", purpose = "other", notes = "robots_agents_url" }]
+  )
+}
+
+data "http" "robots" {
+  count = var.summaries.enable && var.summaries.robots_agents_url != "" ? 1 : 0
+
+  url = var.summaries.robots_agents_url
+
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "robots_agents_url returned HTTP ${self.status_code}, expected 200."
+    }
+  }
 }
 
 resource "aws_s3_object" "robots_agents" {
@@ -13,7 +39,7 @@ resource "aws_s3_object" "robots_agents" {
   bucket       = local.s3_results_bucket_name
   key          = local.robots_key
   content_type = "application/x-ndjson"
-  content      = join("\n", [for a in var.summaries.robots_agents : jsonencode(a)])
+  content      = join("\n", [for a in local.robots_agents_all : jsonencode(a)])
 
   depends_on = [module.s3_bucket_results]
 }
@@ -74,7 +100,6 @@ resource "aws_lambda_function" "summarizer" {
       OUTPUT_LOCATION = "s3://${local.s3_results_bucket_name}/${local.s3_results_bucket_prefix}summarizer/"
       RESULTS_BUCKET  = local.s3_results_bucket_name
       ROBOTS_KEY      = local.robots_key
-      ROBOTS_URL      = var.summaries.robots_agents_url
     }
   }
 

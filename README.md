@@ -184,8 +184,8 @@ Optional (`summaries.enable = true`). An hourly Lambda classifies user agents an
 flowchart LR
   CF[CloudFront] -->|Parquet logs| Logs[(Log bucket<br>cloudfront_logs_parquet)]
   Sched[EventBridge Scheduler<br>hourly at :30 UTC] --> Fn[Summarizer Lambda]
-  Web[robots.txt URL<br>optional] -->|fetched hourly| Fn
-  Robots[(robots_agents<br>S3 object)] -->|tokens| Fn
+  Web[robots.txt URL<br>optional] -->|fetched at plan/apply| Robots[(robots_agents<br>S3 object)]
+  Robots -->|tokens| Fn
   Fn -->|map query: distinct UAs| Ath[Athena workgroup]
   Ath -->|reads| Logs
   Fn -->|classifies, writes gzip JSONL<br>per hour, 90-day expiry| Map[(ua_map/)]
@@ -205,7 +205,11 @@ flowchart LR
 - Rows missing from the map (late-arriving log files) get `ua_class = 'unmapped'`.
 - Log files arrive up to ~17 min after their hour ends (measured on prod), so the :30 run leaves margin. Delivery incidents can delay logs for hours; afterwards, re-run the affected day with `{dt}` to pick up the late files.
 - Reserved concurrency is 1. The Lambda stops the running Athena query and fails when less than 20 s remain.
-- Tokens from `summaries.robots_agents_url` must be `https` (a redirect to a non-`https` URL is rejected); the read is capped at 1 MB and 10 s, tokens shorter than 4 characters and generic ones (`mozilla`, `chrome`, `safari`, `android`, ...) are dropped. Explicit `robots_agents` are never filtered. The token count is logged per run.
+- `summaries.robots_agents_url` is fetched by Terraform on every plan/apply, not by the Lambda (no internet egress needed):
+  - `https` only; a non-200 response fails the plan.
+  - Tokens shorter than 4 characters and generic ones (`mozilla`, `chrome`, `safari`, `android`, ...) are dropped; explicit `robots_agents` are never filtered or overridden.
+  - New tokens show up as a diff on the `robots_agents` S3 object and land in the `robots_agents` table with `purpose = other`.
+  - The Lambda logs the token count per run.
 - `parser_version`: ua-parser release + hash of the tokens + rules version (`rules-N`, bumped when the `ua_class` rules change).
 
 `ua_class`, first match wins:
@@ -310,8 +314,7 @@ The `build` job (read-only) builds the layer and runs the tests; the `commit` jo
 - Classification is frozen once raw logs expire: a `{dt}` re-run only rebuilds days still in the raw logs (90 days).
 - Whole-day re-runs must fit the 900 s Lambda timeout.
 - `suspected_bot` is a heuristic (see above).
-- If the `robots_agents_url` fetch fails, only the explicit tokens are used for that run.
-- Only the previous hour is processed automatically; log delivery lag was measured at 7 min or less.
+- Only the previous hour is processed automatically; log delivery lag was measured at ~17 min on prod.
 
 ## Workgroup guardrails
 
@@ -355,6 +358,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | terraform | >= 1.10 |
 | archive | >= 2.0 |
 | aws | >= 6.44 |
+| http | >= 3.4 |
 
 ### Providers
 
@@ -362,6 +366,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 |------|---------|
 | archive | >= 2.0 |
 | aws | >= 6.44 |
+| http | >= 3.4 |
 
 ### Modules
 
@@ -408,6 +413,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 | [aws_iam_policy_document.summarizer_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.summarizer_scheduler_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
+| [http_http.robots](https://registry.terraform.io/providers/hashicorp/http/latest/docs/data-sources/http) | data source |
 
 ### Inputs
 

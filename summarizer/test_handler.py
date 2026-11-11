@@ -55,7 +55,6 @@ assert c("Java/1.8.0_292")["ua_class"] == "bot"
 r = c("okhttp/4.9.3")
 assert r["ua_class"] == "suspected_bot" and r["agent"] == "okhttp", r
 assert c("Googlebot/2.1")["agent"] == "googlebot"
-assert handler.filter_url_tokens(["GPTBot", "Mozilla", "Gecko", "abc", "Sogou web spider", "Yandex"]) == ["GPTBot", "Sogou web spider"]
 
 now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
 assert handler.parse_event({}, now) == ("2025-12-31", 23, 23)
@@ -74,13 +73,8 @@ for bad in ({"dt": "2026-3-5x"}, {"dt": "2026-03-05", "hour": 24}, {"dt": "2026-
     raise AssertionError(bad)
 
 assert handler.range_params("2026-03-05", 0, 23) == ["'2026/03/05'", "0", "23"]
-txt = "User-agent: *\r\nDisallow: /x\r\nUser-Agent: Sogou web spider\r\nuser-agent:GPTBot \r\nUSER-AGENT: GPTBot\r\n# user-agent: no\r\n"
-assert handler.parse_robots_txt(txt) == ["Sogou web spider", "GPTBot"], handler.parse_robots_txt(txt)
-assert handler.parse_robots_txt("") == []
-assert handler.parse_robots_txt("User-agent: Foo # c\n  user-agent: Bar\nUser-agent:\n") == ["Foo", "Bar"]
 assert handler.parse_event({"scheduled_time": "2026-11-10T00:20:00Z"}, now) == ("2026-11-09", 23, 23)
 assert handler.parse_event({"scheduled_time": "2026-11-10T13:20:00Z"}, now) == ("2026-11-10", 12, 12)
-assert handler.merge_tokens(["GPTBot", "Googlebot"], ["gptbot", "Sogou web spider"]) == ["GPTBot", "Googlebot", "Sogou web spider"]
 assert handler.classify("Sogou web spider/4.0", ["Sogou web spider"])["robots_token"] == "Sogou web spider"
 assert handler.unload_params("2026-03-05", 7, 7) == ["'2026-03-05'", "'2026/03/05'", "7", "7"]
 
@@ -150,33 +144,3 @@ try:
 except RuntimeError:
     assert store == before, store
 print("ok")
-
-
-class FakeResp:
-    def __init__(self, data: bytes = b"", url: str = "https://x.test/robots.txt") -> None:
-        self.data, self.url, self.calls = data, url, 0
-
-    def read1(self, n: int) -> bytes:
-        self.calls += 1
-        chunk, self.data = self.data[:n], self.data[n:]
-        return chunk
-
-    def __enter__(self) -> "FakeResp":
-        return self
-
-    def __exit__(self, *a: object) -> None:
-        return None
-
-
-big = FakeResp(b"x" * (handler.ROBOTS_MAX_BYTES + 5000))
-assert len(handler.read_capped(big)) == handler.ROBOTS_MAX_BYTES and big.calls == 16
-
-with mock.patch.object(handler, "ROBOTS_URL", "http://x.test/robots.txt"), mock.patch.object(handler.urllib.request, "urlopen") as uo:
-    assert handler.url_tokens() == []
-    uo.assert_not_called()
-
-with mock.patch.object(handler, "ROBOTS_URL", "https://x.test/robots.txt"):
-    with mock.patch.object(handler.urllib.request, "urlopen", return_value=FakeResp(b"User-agent: GPTBot\n")):
-        assert handler.url_tokens() == ["GPTBot"]
-    with mock.patch.object(handler.urllib.request, "urlopen", return_value=FakeResp(b"User-agent: GPTBot\n", "http://x.test/robots.txt")):
-        assert handler.url_tokens() == []

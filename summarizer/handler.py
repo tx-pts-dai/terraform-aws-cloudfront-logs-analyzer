@@ -12,8 +12,8 @@ Events:
   {"dt": "YYYY-MM-DD", "hour": H}  one hour
   {"dt": "YYYY-MM-DD"}          whole day
 
-Tokens come from the explicit robots_agents JSONL plus, when ROBOTS_URL is set,
-the user-agents of that robots.txt (https only).
+Tokens come from the robots_agents JSONL in S3, which Terraform builds from
+summaries.robots_agents plus the user-agents of summaries.robots_agents_url.
 """
 import codecs
 import csv
@@ -23,7 +23,6 @@ import json
 import os
 import re
 import time
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import version
 from typing import Any, Iterator
@@ -37,20 +36,12 @@ WORKGROUP = os.environ.get("WORKGROUP", "")
 OUTPUT_LOCATION = os.environ.get("OUTPUT_LOCATION", "")
 RESULTS_BUCKET = os.environ.get("RESULTS_BUCKET", "")
 ROBOTS_KEY = os.environ.get("ROBOTS_KEY", "")
-ROBOTS_URL = os.environ.get("ROBOTS_URL", "")
 
 RULES_VERSION = "rules-2"
 CHROME_RE = re.compile(r"Chrome/(\d+)\.(\d+)\.(\d+)\.(\d+)")
-USER_AGENT_LINE_RE = re.compile(r"^\s*user-agent:([^#\r\n]*)", re.I | re.M)
 SUMMARIES = ("cf_ua_hourly", "cf_bot_errors_hourly")
 UA_MAX_LEN = 1024
 AGENT_CTX = 64
-ROBOTS_MAX_BYTES = 1_048_576
-ROBOTS_BUDGET_S = 10
-URL_TOKEN_MIN_LEN = 4
-URL_TOKEN_DENY = frozenset(
-    {"mozilla", "applewebkit", "gecko", "chrome", "safari", "android", "iphone", "windows", "linux", "mobile", "yandex"}
-)
 
 # okhttp is also used by human-driven apps, so it only makes a suspected_bot
 KEY_RE = re.compile(
@@ -194,18 +185,6 @@ def parser_version(tokens: list[str]) -> str:
     return f"ua-parser-{version('ua-parser')}+builtins-{version('ua-parser-builtins')}+{digest}+{RULES_VERSION}"
 
 
-def parse_robots_txt(text: str) -> list[str]:
-    """Return distinct user-agent tokens of a robots.txt, in order, without '*'."""
-    found = (m.strip() for m in USER_AGENT_LINE_RE.findall(text))
-    return list(dict.fromkeys(t for t in found if t and t != "*"))
-
-
-def merge_tokens(explicit: list[str], from_url: list[str]) -> list[str]:
-    """Explicit tokens first; URL tokens are added unless equal (case-insensitive) to an explicit one."""
-    seen = {t.lower() for t in explicit}
-    return explicit + [t for t in from_url if t.lower() not in seen]
-
-
 def read_tokens(key: str) -> list[str] | None:
     """Read tokens from a robots_agents JSONL in S3; None if the key does not exist."""
     try:
@@ -215,46 +194,11 @@ def read_tokens(key: str) -> list[str] | None:
     return [json.loads(line)["token"] for line in body.splitlines() if line.strip()]
 
 
-def filter_url_tokens(tokens: list[str]) -> list[str]:
-    """Drop tokens too short or generic to identify an agent; applied to URL tokens only."""
-    return [t for t in tokens if len(t) >= URL_TOKEN_MIN_LEN and t.lower() not in URL_TOKEN_DENY]
-
-
-def read_capped(resp: Any) -> bytes:
-    """Read at most ROBOTS_MAX_BYTES within ROBOTS_BUDGET_S seconds; raise on timeout."""
-    end = time.monotonic() + ROBOTS_BUDGET_S
-    buf = bytearray()
-    while len(buf) < ROBOTS_MAX_BYTES:
-        if time.monotonic() > end:
-            raise TimeoutError(f"read exceeded {ROBOTS_BUDGET_S}s")
-        chunk = resp.read1(min(65536, ROBOTS_MAX_BYTES - len(buf)))
-        if not chunk:
-            break
-        buf += chunk
-    return bytes(buf)
-
-
-def url_tokens() -> list[str]:
-    """Fetch tokens from ROBOTS_URL; empty on any failure."""
-    if not ROBOTS_URL:
-        return []
-    try:
-        if urlparse(ROBOTS_URL).scheme != "https":
-            raise ValueError("ROBOTS_URL must use https")
-        req = urllib.request.Request(ROBOTS_URL, headers={"User-Agent": "cf-logs-summarizer"})
-        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-            if urlparse(resp.url).scheme != "https":
-                raise ValueError("robots.txt redirected to a non-https URL")
-            return filter_url_tokens(parse_robots_txt(read_capped(resp).decode("utf-8", errors="replace")))
-    except Exception as e:  # noqa: BLE001
-        print(f"WARNING: robots.txt fetch failed ({e}); using explicit tokens only")
-        return []
-
-
 def load_tokens() -> list[str]:
-    """Explicit robots tokens from S3 merged with those of ROBOTS_URL."""
-    explicit = read_tokens(ROBOTS_KEY) or []
-    return merge_tokens(explicit, url_tokens())
+    """Tokens from the robots_agents JSONL in S3 (built by Terraform from robots_agents and robots_agents_url)."""
+    tokens = read_tokens(ROBOTS_KEY) or []
+    print(f"robots tokens: {len(tokens)}")
+    return tokens
 
 
 def run_query(sql: str, params: list[str] | None = None, deadline: float | None = None) -> str:
