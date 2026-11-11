@@ -80,4 +80,4 @@ notes     STRING   -- Free text
 
 **Format:** JSON lines
 
-**Maintenance:** Written by Terraform, do not edit in S3. Source is `summaries.robots_agents` (default list of known bots). If `summaries.robots_agents_url` is set, the Lambda fetches it every run and merges its `User-agent` tokens case-insensitively (explicit wins; `*` and comments ignored). On fetch failure only the explicit tokens are used. URL tokens are not written to the table. See [README](README.md#ua-summaries).
+**Maintenance:** Written by Terraform, do not edit in S3. Source is `summaries.robots_agents` (default list of known bots). If `summaries.robots_agents_url` is set, Terraform fetches it at plan/apply and adds its `User-agent` tokens (explicit wins case-insensitively; `*`, comments, short and generic tokens ignored) with `purpose = other` and `notes = robots_agents_url`. See [README](README.md#ua-summaries).

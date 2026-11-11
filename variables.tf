@@ -166,4 +166,9 @@ variable "summaries" {
     ])
     error_message = "robots_agents purpose must be one of: search, ai-training, ai-search, ai-user, ads, other"
   }
+
+  validation {
+    condition     = var.summaries.robots_agents_url == "" || startswith(var.summaries.robots_agents_url, "https://")
+    error_message = "robots_agents_url must be empty or start with https://"
+  }
 }
