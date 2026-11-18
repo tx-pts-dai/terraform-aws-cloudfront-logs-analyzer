@@ -4,7 +4,7 @@ This module provides a AWS resources and helper scripts to analyze CloudFront Pa
 
 ## Basic Usage
 
-Replace `x.y.z` with the release that includes the inputs used (`summaries`, `athena_workgroup`, `results_expiration_days` need the next release after 0.3.1).
+Replace `x.y.z` with the release that includes the inputs used (`summaries`, `athena_workgroup`, `results_expiration_days` need v0.5.0).
 Minimal
 ```
 module "global_logs_analyzer" {
@@ -52,7 +52,8 @@ module "global_logs_analyzer" {
   }
  
   grafana_access = {
-    create = true
+    create            = true
+    trusted_role_arns = ["arn:aws:iam::123456789012:role/grafana"]
   }
 }
 ```
@@ -85,7 +86,8 @@ module "per_distrologs_analyzer" {
   }
 
   grafana_access = {
-    create = true
+    create            = true
+    trusted_role_arns = ["arn:aws:iam::123456789012:role/grafana"]
   }
 }
 ```
@@ -206,7 +208,8 @@ flowchart LR
 - Log files arrive up to ~17 min after their hour ends (measured on prod), so the :30 run leaves margin. Delivery incidents can delay logs for hours; afterwards, re-run the affected day with `{dt}` to pick up the late files.
 - Reserved concurrency is 1. The Lambda stops the running Athena query and fails when less than 20 s remain.
 - `summaries.robots_agents_url` is fetched by Terraform on every plan/apply, not by the Lambda (no internet egress needed):
-  - `https` only; a non-200 response fails the plan.
+  - `https` only; a non-200 response, a request taking over 10 s (retried once) or a body without `User-agent:` lines fails the plan.
+  - Break-glass: `robots_agents_url = ""` unblocks a plan while the site is down; it drops the URL tokens and changes `parser_version`.
   - Tokens shorter than 4 characters and generic ones (`mozilla`, `chrome`, `safari`, `android`, ...) are dropped; explicit `robots_agents` are never filtered or overridden.
   - New tokens show up as a diff on the `robots_agents` S3 object and land in the `robots_agents` table with `purpose = other`.
   - The Lambda logs the token count per run.
@@ -245,7 +248,7 @@ Backfills should use `--invocation-type RequestResponse`: the error comes back t
 
 ### Tables
 
-`robots_agents` (JSON): one row per explicit token (`summaries.robots_agents`).
+`robots_agents` (JSON): one row per explicit token (`summaries.robots_agents`) and per token of `summaries.robots_agents_url`.
 
 | Column | Meaning |
 |--------|---------|
@@ -301,7 +304,7 @@ SELECT cardinality(merge(cast(uas_hll AS HyperLogLog))) FROM cf_ua_hourly WHERE 
 | `ua_map/` | `dt=YYYY-MM-DD/hour=HH/map.jsonl.gz`; expires after 90 days |
 | `summaries/cf_ua_hourly/`, `summaries/cf_bot_errors_hourly/` | `dt=YYYY-MM-DD/hour=HH/` Parquet, no expiry |
 
-The expiry rules exist only when the module creates the results bucket (`s3_results_bucket.create = true`); otherwise add equivalent lifecycle rules yourself.
+The expiry rules exist only when the module creates the results bucket (`s3_results_bucket.create = true`); otherwise add equivalent lifecycle rules yourself. The `athena-results/` expiry covers only results under `output_prefix`, not clients on `primary` with their own output location.
 
 ### Lambda layer
 
@@ -318,12 +321,14 @@ The `build` job (read-only) builds the layer and runs the tests; the `commit` jo
 
 ## Workgroup guardrails
 
-`athena_workgroup.create = true` creates a workgroup with:
+A dedicated workgroup is optional (the summarizer also runs on `primary`). It is recommended because `primary` is shared by the whole account and can't get these guardrails without affecting other users. `athena_workgroup.create = true` creates a workgroup with:
 
 - `bytes_scanned_cutoff_per_query`: default 100 GB (~2.5x the largest observed dashboard query, 38 GB); larger queries are cancelled.
 - Enforced workgroup configuration (clients cannot override output location or limits).
 - CloudWatch metrics enabled.
-- Results written to the results bucket with SSE-S3; `athena-results/` (default output prefix) expires after `s3_results_bucket.results_expiration_days` (default 30); this rule exists only when the module creates the results bucket (`s3_results_bucket.create = true`).
+- Results written to the results bucket with SSE-S3; `athena-results/` (default output prefix) expires after `s3_results_bucket.results_expiration_days` (default 30); this rule exists only when the module creates the results bucket (`s3_results_bucket.create = true`) and covers only results under `output_prefix`, not clients on `primary` with their own output location.
+
+`athena_workgroup = { create = true }` without `name` creates `cloudfront-logs-<id>`. The Grafana role is scoped to that workgroup, so datasources must switch to it.
 
 ## Contributing
 
@@ -355,7 +360,7 @@ Generated with `terraform-docs markdown --anchor=false --html=false --indent=3 -
 
 | Name | Version |
 |------|---------|
-| terraform | >= 1.10 |
+| terraform | >= 1.12 |
 | archive | >= 2.0 |
 | aws | >= 6.44 |
 | http | >= 3.4 |

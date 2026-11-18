@@ -57,24 +57,19 @@ assert r["ua_class"] == "suspected_bot" and r["agent"] == "okhttp", r
 assert c("Googlebot/2.1")["agent"] == "googlebot"
 
 now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
-assert handler.parse_event({}, now) == ("2025-12-31", 23, 23)
-assert handler.parse_event({"dt": "2026-03-05", "hour": 7}, now) == ("2026-03-05", 7, 7)
-assert handler.parse_event({"dt": "2026-03-05"}, now) == ("2026-03-05", 0, 23)
-try:
-    handler.parse_event({"reparse": True}, now)
-    raise AssertionError("reparse accepted")
-except ValueError:
-    pass
+assert handler.parse_event_date({}, now) == ("2025-12-31", 23, 23)
+assert handler.parse_event_date({"dt": "2026-03-05", "hour": 7}, now) == ("2026-03-05", 7, 7)
+assert handler.parse_event_date({"dt": "2026-03-05"}, now) == ("2026-03-05", 0, 23)
 for bad in ({"dt": "2026-3-5x"}, {"dt": "2026-03-05", "hour": 24}, {"dt": "2026-03-05", "hour": "1"}, {"dt": "2026-03-05", "hour": True}):
     try:
-        handler.parse_event(bad, now)
+        handler.parse_event_date(bad, now)
     except ValueError:
         continue
     raise AssertionError(bad)
 
 assert handler.range_params("2026-03-05", 0, 23) == ["'2026/03/05'", "0", "23"]
-assert handler.parse_event({"scheduled_time": "2026-11-10T00:20:00Z"}, now) == ("2026-11-09", 23, 23)
-assert handler.parse_event({"scheduled_time": "2026-11-10T13:20:00Z"}, now) == ("2026-11-10", 12, 12)
+assert handler.parse_event_date({"scheduled_time": "2026-11-10T00:20:00Z"}, now) == ("2026-11-09", 23, 23)
+assert handler.parse_event_date({"scheduled_time": "2026-11-10T13:20:00Z"}, now) == ("2026-11-10", 12, 12)
 assert handler.classify("Sogou web spider/4.0", ["Sogou web spider"])["robots_token"] == "Sogou web spider"
 assert handler.unload_params("2026-03-05", 7, 7) == ["'2026-03-05'", "'2026/03/05'", "7", "7"]
 
@@ -97,10 +92,10 @@ handler.list_keys = lambda p: [p + "old.gz"] if p.endswith("hour=02/") else []
 handler.delete_keys = lambda ks: calls.append(("del", ks))
 handler.s3 = mock.MagicMock()
 handler.s3.put_object.side_effect = lambda **k: calls.append(("put", k["Key"]))
-assert handler.write_ua_map("2026-03-05", 0, 3, TOKENS) == 3
+assert handler.write_ua_map("2026-03-05", 0, 3, TOKENS) == (3, {1, 3})
 puts = [x[1] for x in calls if x[0] == "put"]
 assert puts == ["ua_map/dt=2026-03-05/hour=01/map.jsonl.gz", "ua_map/dt=2026-03-05/hour=03/map.jsonl.gz"], puts
-assert ("del", ["ua_map/dt=2026-03-05/hour=02/old.gz"]) in calls, calls
+assert not any("hour=02/" in k for x in calls if x[0] == "del" for k in x[1]), calls
 calls.clear()
 handler.stream_results = lambda qid: iter([])
 try:
@@ -121,7 +116,7 @@ def unload_ok(sql: str, params: list, deadline: float | None = None) -> str:
 
 
 handler.run_query = unload_ok
-handler.rebuild_summaries("2026-03-05", 1, 1)
+handler.rebuild_summaries("2026-03-05", 1, 1, {1})
 assert store == {
     "summaries/cf_ua_hourly/dt=2026-03-05/hour=01/new.parquet",
     "summaries/cf_bot_errors_hourly/dt=2026-03-05/hour=01/new.parquet",
@@ -139,7 +134,38 @@ def unload_fail(sql: str, params: list, deadline: float | None = None) -> str:
 
 handler.run_query = unload_fail
 try:
-    handler.rebuild_summaries("2026-03-05", 1, 1)
+    handler.rebuild_summaries("2026-03-05", 1, 1, {1})
+    raise AssertionError("failed UNLOAD swallowed")
+except RuntimeError:
+    assert store == before, store
+
+store.clear()
+store.update(f"summaries/{t}/dt=2026-03-05/hour={h:02d}/old.parquet" for t in handler.SUMMARIES for h in range(24))
+before = set(store)
+
+
+def unload_new(sql: str, params: list, deadline: float | None = None) -> str:
+    table = "cf_ua_hourly" if "summaries/cf_ua_hourly/" in sql else "cf_bot_errors_hourly"
+    store.update(f"summaries/{table}/dt=2026-03-05/hour={h:02d}/new.parquet" for h in range(24))
+    return "q"
+
+
+handler.run_query = unload_new
+handler.rebuild_summaries("2026-03-05", 0, 23, {23})
+assert before - store == {k for k in before if "hour=23/" in k}, before - store
+
+store.clear()
+store.update(before)
+
+
+def unload_partial(sql: str, params: list, deadline: float | None = None) -> str:
+    store.update(f"summaries/cf_ua_hourly/dt=2026-03-05/hour={h:02d}/partial.parquet" for h in (5, 23))
+    raise RuntimeError("unload failed")
+
+
+handler.run_query = unload_partial
+try:
+    handler.rebuild_summaries("2026-03-05", 0, 23, {23})
     raise AssertionError("failed UNLOAD swallowed")
 except RuntimeError:
     assert store == before, store

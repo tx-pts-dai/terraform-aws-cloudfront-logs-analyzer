@@ -2,12 +2,12 @@
 
 ## Overview
 
-Two support tables are created to optimize CloudFront log analysis:
+Two Parquet support tables are created to optimize CloudFront log analysis:
 
 1. **`ip_whitelist`** - Filter out known good IPs (search bots, monitoring, internal services)
 2. **`ip_geolocation`** - Cache geolocation lookups to avoid repeated API calls
 
-Both tables use **Parquet format** stored in S3 for optimal query performance and cost efficiency.
+Both use **Parquet format** stored in S3 for optimal query performance and cost efficiency.
 
 ---
 
@@ -66,7 +66,7 @@ source       STRING     -- Source of the lookup (e.g., ipinfo)
 
 ## Table: robots_agents
 
-**Purpose:** Explicit robots.txt agent tokens used by the UA summarizer to set `robots_token` in `ua_map`. Only created with `summaries.enable = true`.
+**Purpose:** Robots.txt agent tokens (explicit and from `summaries.robots_agents_url`) used by the UA summarizer to set `robots_token` in `ua_map`. Only created with `summaries.enable = true`.
 
 **Schema:**
 ```sql

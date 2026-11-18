@@ -51,14 +51,6 @@ KEY_RE = re.compile(
 AGENT_HEAD_RE = re.compile(r"[a-z0-9_.-]*$")
 AGENT_TAIL_RE = re.compile(r"[a-z0-9_.-]{0,%d}" % AGENT_CTX)
 
-MAP_SQL = """
-SELECT hour, coalesce(cs_user_agent, '-') AS cs_user_agent
-FROM cloudfront_logs_parquet
-WHERE dt = ? AND hour BETWEEN ? AND ?
-GROUP BY 1, 2
-ORDER BY 1
-"""
-
 # Parameters: map dt (YYYY-MM-DD), raw dt (YYYY/MM/DD), first hour, last hour.
 # partitioned_by columns must be last in the SELECT; hour is zero-padded to match the "hour=HH" projection template.
 # LEFT JOIN keeps rows of late-arriving logs that the map query did not see (ua_class 'unmapped').
@@ -114,10 +106,8 @@ s3 = boto3.client("s3")
 athena = boto3.client("athena")
 
 
-def parse_event(event: dict[str, Any], now: datetime) -> tuple[str, int, int]:
+def parse_event_date(event: dict[str, Any], now: datetime) -> tuple[str, int, int]:
     """Return (dt 'YYYY-MM-DD', first_hour, last_hour)."""
-    if "reparse" in event:
-        raise ValueError("reparse is no longer supported; re-run with {dt} instead")
     if "dt" not in event:
         if "scheduled_time" in event:
             now = datetime.fromisoformat(event["scheduled_time"])
@@ -266,9 +256,15 @@ def stream_results(qid: str) -> Iterator[list[str]]:
     yield from reader
 
 
-def write_ua_map(dt: str, lo: int, hi: int, tokens: list[str], deadline: float | None = None) -> int:
-    """Write ua_map for the hour range, one object per hour; return the number of user agents."""
-    qid = run_query(MAP_SQL, range_params(dt, lo, hi), deadline)
+def write_ua_map(dt: str, lo: int, hi: int, tokens: list[str], deadline: float | None = None) -> tuple[int, set[int]]:
+    """Write ua_map for the hour range, one object per hour; return the number of user agents and the hours written."""
+    qid = run_query("""
+      SELECT hour, coalesce(cs_user_agent, '-') AS cs_user_agent
+      FROM cloudfront_logs_parquet
+      WHERE dt = ? AND hour BETWEEN ? AND ?
+      GROUP BY 1, 2
+      ORDER BY 1
+    """, range_params(dt, lo, hi), deadline)
     pv = parser_version(tokens)
     rows: list[dict[str, Any]] = []
     done: set[int] = set()
@@ -295,20 +291,20 @@ def write_ua_map(dt: str, lo: int, hi: int, tokens: list[str], deadline: float |
         raise RuntimeError(f"no user agents found for {dt} hours {lo}-{hi}")
     if current is not None:
         flush(current)
-    delete_keys([k for h in range(lo, hi + 1) if h not in done for k in list_keys(f"ua_map/dt={dt}/hour={h:02d}/")])
-    return total
+    return total, done
 
 
-def rebuild_summaries(dt: str, lo: int, hi: int, deadline: float | None = None) -> None:
-    """UNLOAD the summary partitions for the range, then delete the files they replace; on failure delete the new files."""
+def rebuild_summaries(dt: str, lo: int, hi: int, hours: set[int], deadline: float | None = None) -> None:
+    """UNLOAD the summary partitions for the range, then delete the files they replace in the given hours; on failure delete the new files."""
     for table in SUMMARIES:
         prefixes = [f"summaries/{table}/dt={dt}/hour={h:02d}/" for h in range(lo, hi + 1)]
-        old = {k for p in prefixes for k in list_keys(p)}
+        before = {k for p in prefixes for k in list_keys(p)}
+        old = {k for h in hours for k in list_keys(f"summaries/{table}/dt={dt}/hour={h:02d}/")}
         location = f"s3://{RESULTS_BUCKET}/summaries/{table}/"
         try:
             run_query(UNLOAD_SQL[table].format(location=location), unload_params(dt, lo, hi), deadline)
         except Exception:
-            delete_keys(sorted({k for p in prefixes for k in list_keys(p)} - old))
+            delete_keys(sorted({k for p in prefixes for k in list_keys(p)} - before))
             raise
         delete_keys(sorted(old))
 
@@ -316,9 +312,10 @@ def rebuild_summaries(dt: str, lo: int, hi: int, deadline: float | None = None) 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entry point."""
     tokens = load_tokens()
-    print(f"tokens: {len(tokens)}")
-    dt, lo, hi = parse_event(event, datetime.now(timezone.utc))
+    dt, lo, hi = parse_event_date(event, datetime.now(timezone.utc))
+
+    # deadline for the process to finish before lambda goes in timeout
     deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - 20
-    mapped = write_ua_map(dt, lo, hi, tokens, deadline)
-    rebuild_summaries(dt, lo, hi, deadline)
+    mapped, done = write_ua_map(dt, lo, hi, tokens, deadline)
+    rebuild_summaries(dt, lo, hi, done, deadline)
     return {"dt": dt, "hours": [lo, hi], "user_agents": mapped}
