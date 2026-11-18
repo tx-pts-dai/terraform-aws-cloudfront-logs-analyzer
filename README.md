@@ -321,7 +321,7 @@ The `build` job (read-only) builds the layer and runs the tests; the `commit` jo
 
 ## Workgroup guardrails
 
-`athena_workgroup.create = true` creates a workgroup with:
+A dedicated workgroup is optional (the summarizer also runs on `primary`). It is recommended because `primary` is shared by the whole account and can't get these guardrails without affecting other users. `athena_workgroup.create = true` creates a workgroup with:
 
 - `bytes_scanned_cutoff_per_query`: default 100 GB (~2.5x the largest observed dashboard query, 38 GB); larger queries are cancelled.
 - Enforced workgroup configuration (clients cannot override output location or limits).
