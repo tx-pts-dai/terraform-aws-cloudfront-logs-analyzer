@@ -1,6 +1,6 @@
 ## Providers
 terraform {
-  required_version = ">= 1.10"
+  required_version = ">= 1.12"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -243,6 +243,14 @@ data "aws_iam_policy_document" "grafana_athena_query_policy" {
       "arn:aws:s3:::${local.s3_results_bucket_name}",
       "arn:aws:s3:::${local.s3_results_bucket_name}/*",
     ]
+  }
+
+  # Files written by Terraform and the summarizer must not be overwritten by Grafana
+  statement {
+    sid       = "DenyWritesToModuleData"
+    effect    = "Deny"
+    actions   = ["s3:PutObject"]
+    resources = [for p in ["supporters", "ua_map", "summaries"] : "arn:aws:s3:::${local.s3_results_bucket_name}/${p}/*"]
   }
 }
 resource "aws_iam_policy" "grafana_athena_query_policy" {

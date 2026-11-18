@@ -24,7 +24,6 @@ data "aws_iam_policy_document" "summarizer" {
     actions = [
       "athena:StartQueryExecution",
       "athena:GetQueryExecution",
-      "athena:GetQueryResults",
       "athena:StopQueryExecution",
     ]
     resources = ["arn:aws:athena:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup_name}"]
@@ -63,7 +62,7 @@ data "aws_iam_policy_document" "summarizer" {
 
   statement {
     sid       = "RawLogsBucket"
-    actions   = ["s3:GetBucketLocation", "s3:ListBucketMultipartUploads"]
+    actions   = ["s3:GetBucketLocation"]
     resources = ["arn:aws:s3:::${var.s3_parquet_bucket.name}"]
   }
 

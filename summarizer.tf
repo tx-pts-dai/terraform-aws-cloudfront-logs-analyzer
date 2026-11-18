@@ -23,12 +23,22 @@ locals {
 data "http" "robots" {
   count = var.summaries.enable && var.summaries.robots_agents_url != "" ? 1 : 0
 
-  url = var.summaries.robots_agents_url
+  url                = var.summaries.robots_agents_url
+  request_timeout_ms = 10000
+
+  retry {
+    attempts = 2
+  }
 
   lifecycle {
     postcondition {
       condition     = self.status_code == 200
       error_message = "robots_agents_url returned HTTP ${self.status_code}, expected 200."
+    }
+
+    postcondition {
+      condition     = length(regexall("(?im)^[ \\t]*user-agent:", self.response_body)) > 0
+      error_message = "robots_agents_url returned no User-agent lines; it is not a robots.txt (HTML or WAF page?)."
     }
   }
 }
