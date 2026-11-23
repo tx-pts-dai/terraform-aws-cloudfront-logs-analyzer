@@ -153,6 +153,8 @@ variable "summaries" {
       { token = "Claude-User", operator = "Anthropic", purpose = "ai-user" },
       { token = "Perplexity-User", operator = "Perplexity", purpose = "ai-user" },
       { token = "Meta-ExternalFetcher", operator = "Meta", purpose = "ai-user" },
+      { token = "Mediapartners-Google", operator = "Google", purpose = "ads" },
+      { token = "GoogleOther", operator = "Google", purpose = "other" },
     ])
   })
   default = {
