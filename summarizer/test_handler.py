@@ -41,7 +41,7 @@ for empty in ("", "-"):
 
 t0 = time.perf_counter()
 r = c("a" * 8192)
-assert time.perf_counter() - t0 < 0.05 and r["ua_class"] == "human", r
+assert time.perf_counter() - t0 < 0.05 and r["ua_class"] == "suspected_bot", r
 t0 = time.perf_counter()
 assert handler.find_agent("a" * 1_000_000 + " googlebot")[0] == "googlebot"
 assert time.perf_counter() - t0 < 0.5
@@ -82,6 +82,20 @@ assert r["ua_class"] == "human", r
 assert c("Mozilla/5.0%20(Windows%20NT%2010.0)%20AppleWebKit/537.36%20(KHTML,%20like%20Gecko)%20App/1.0%20Chrome/157.0.8103.38%20Electron/30.0.0%20Safari/537.36")["ua_class"] == "human"
 assert c(CHROME.format("154.0.8037.99") + "%20Diffbot/0.1")["ua_class"] == "bot"
 assert c("axios/1.13.2")["ua_class"] == "bot"
+for ua in ("Datadog%20Agent/7.84.1", "node", "Alinea/2%20(personal%20article%20reader)"):
+    assert c(ua)["ua_class"] == "suspected_bot", ua
+for ua in ("akka-http/10.1.10", "got%20(https://github.com/sindresorhus/got)", "Feeder/1.0%20(feeder.co/fetcher)", "PostmanRuntime/7.20.1"):
+    assert c(ua)["ua_class"] == "bot", ua
+for ua in (
+    "NetworkingExtension/8625.2.8.10.7%20Network/6681.42.3%20iOS/27.2.1",
+    "com.apple.WebKit.Networking/22625.2.8.11.9%20Network/6681.41.1%20macOS/27.2.1",
+    CHROME.format("125.0.0.0"),
+    "Dalvik/2.1.0%20(Linux;%20U;%20Android%2017;%20SM-S911B%20Build/CP2A.260605.016)",
+    "Reeder/5060003%20CFNetwork/3896.200.61%20Darwin/27.2.0",
+):
+    assert c(ua)["ua_class"] == "human", ua
+r = handler.classify("Mediapartners-Google", TOKENS + ["Mediapartners-Google"])
+assert r["ua_class"] == "bot" and r["robots_token"] == "Mediapartners-Google", r
 assert handler.parser_version(TOKENS).endswith("+" + handler.RULES_VERSION)
 assert c("Mozilla/5.0%20(Linux;%20Android%2014)%20AppleWebKit/537.36%20Version/4.0%20Chrome/157.0.8103.38%20Mobile%20Safari/537.36")["ua_class"] == "human"
 

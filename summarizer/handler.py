@@ -37,7 +37,8 @@ OUTPUT_LOCATION = os.environ.get("OUTPUT_LOCATION", "")
 RESULTS_BUCKET = os.environ.get("RESULTS_BUCKET", "")
 ROBOTS_KEY = os.environ.get("ROBOTS_KEY", "")
 
-RULES_VERSION = "rules-2"
+RULES_VERSION = "rules-3"
+APPLE_NETWORKING = ("NetworkingExtension/", "com.apple.WebKit.Networking/")
 CHROME_RE = re.compile(r"Chrome/(\d+)\.(\d+)\.(\d+)\.(\d+)")
 SUMMARIES = ("cf_ua_hourly", "cf_bot_errors_hourly")
 UA_MAX_LEN = 1024
@@ -46,7 +47,7 @@ AGENT_CTX = 64
 # okhttp is also used by human-driven apps, so it only makes a suspected_bot
 KEY_RE = re.compile(
     r"(?<!cu)bot|crawler|spider|headless|lightpanda|thinkers|magentanews|python|curl|wget"
-    r"|go-http|java(?!script)|axios|node-fetch|scrapy|(?P<weak>okhttp)"
+    r"|go-http|java(?!script)|axios|node-fetch|scrapy|akka-http|vert\.x|postmanruntime|^got(?= \()|fetcher|(?P<weak>okhttp)"
 )
 AGENT_HEAD_RE = re.compile(r"[a-z0-9_.-]*$")
 AGENT_TAIL_RE = re.compile(r"[a-z0-9_.-]{0,%d}" % AGENT_CTX)
@@ -149,7 +150,7 @@ def find_agent(low: str) -> tuple[str, bool]:
 
 
 def classify(raw: str, tokens: list[str]) -> dict[str, Any]:
-    """Classify a raw user agent into a ua_map row; suspected_bot also flags desktop apps embedding Chromium (QtWebEngine, CEF), webviews without "; wv)", okhttp and a missing UA."""
+    """Classify a raw user agent into a ua_map row; suspected_bot also flags desktop apps embedding Chromium (QtWebEngine, CEF), webviews without "; wv)", okhttp, a missing UA and non-browser UAs (ua-parser family Other, not Mozilla/ or Apple system networking)."""
     ua = unquote(raw[:UA_MAX_LEN])
     r = parse(ua).with_defaults()
     agent, weak = find_agent(ua.lower())
@@ -157,7 +158,8 @@ def classify(raw: str, tokens: list[str]) -> dict[str, Any]:
     if r.device.family == "Spider" or (agent and not weak) or token:
         ua_class = "bot"
     else:
-        ua_class = "suspected_bot" if weak or raw in ("", "-") or is_suspected_bot(ua) else "human"
+        non_browser = r.user_agent.family == "Other" and not ua.startswith(("Mozilla/", *APPLE_NETWORKING))
+        ua_class = "suspected_bot" if weak or raw in ("", "-") or non_browser or is_suspected_bot(ua) else "human"
     return {
         "cs_user_agent": raw,
         "family": r.user_agent.family,
