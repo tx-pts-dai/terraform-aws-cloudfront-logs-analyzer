@@ -172,7 +172,8 @@ data "aws_iam_policy_document" "grafana_athena_query_policy" {
       "athena:GetQueryResultsStream",
     ]
     resources = [
-      "arn:aws:athena:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup_name}",
+      for w in distinct(concat([local.athena_workgroup_name], var.grafana_access.additional_workgroups)) :
+      "arn:aws:athena:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:workgroup/${w}"
     ]
   }
 

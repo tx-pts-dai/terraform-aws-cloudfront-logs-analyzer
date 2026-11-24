@@ -77,12 +77,13 @@ variable "s3_supporters_files" {
 
 # Grafana
 variable "grafana_access" {
-  description = "Configuration for Grafana integration"
+  description = "Configuration for Grafana integration. additional_workgroups: extra Athena workgroups the role may query, e.g. while datasources move to the module workgroup."
   type = object({
-    create            = bool
-    name              = optional(string, "cloudfront-logs-grafana-access")
-    trusted_role_arns = optional(list(string), [])
-    custom_policy_arn = optional(string)
+    create                = bool
+    name                  = optional(string, "cloudfront-logs-grafana-access")
+    trusted_role_arns     = optional(list(string), [])
+    custom_policy_arn     = optional(string)
+    additional_workgroups = optional(list(string), [])
   })
   default = {
     create = false
